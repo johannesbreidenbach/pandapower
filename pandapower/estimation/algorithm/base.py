@@ -6,6 +6,7 @@
 import numpy as np
 from scipy.sparse import csr_matrix, vstack, hstack
 from scipy.sparse.linalg import spsolve, norm, inv
+from scipy.optimize import linprog
 
 from pandapower.estimation.algorithm.estimator import BaseEstimatorIRWLS, get_estimator
 from pandapower.estimation.algorithm.matrix_base import BaseAlgebra, \
@@ -22,27 +23,64 @@ __all__ = ["WLSAlgorithm", "WLSZeroInjectionConstraintsAlgorithm", "IRWLSAlgorit
 
 
 class BaseAlgorithm:
-    def __init__(self, tolerance, maximum_iterations, logger=std_logger):
+    def __init__(self, tolerance: float, maximum_iterations: int, logger: logging.Logger = std_logger) -> None:
+        """
+        Initialize the base algorithm.
+
+        :param float tolerance: Convergence threshold value.
+        :param int maximum_iterations: maximum number of iterations allowed for converge.
+        :param logging.Logger logger: Logger instance
+
+        :return: None
+        """
         self.tolerance = tolerance
         self.max_iterations = maximum_iterations
         self.logger = logger
-        self.successful = False
-        self.iterations = None
+        self.successful = False  # state estimation converges, true if current_error <= self.tolerance -> end
+        self.iterations = None  # number of iterations after estimation
 
         # Parameters for estimate
-        self.eppci = None
-        self.pp_meas_indices = None
+        self.eppci = None  # central data container: net, measurements, z-vector, etc.
+        self.pp_meas_indices = None  # mapping between pandapower measurements and z-vector
 
-    def check_observability(self, eppci: ExtendedPPCI, z):
-        # Check if observability criterion is fulfilled and the state estimation is possible
-        num_slacks = sum(~eppci.non_slack_bus_mask)
-        measurements_available = 2 * eppci["bus"].shape[0] - num_slacks
-        if len(z) < measurements_available:
+    def check_observability(self) -> None:
+        """
+        Check the basic measurement count criterion for observability.
+
+        This verifies whether the number of measurements is at least as large as the number of state variables, i.e.
+        approximately 2N - number_of_slacks.
+
+        :return: None
+        """
+
+        if self.eppci is None:
+            raise ValueError("eppci must be initialized before checking observability.")
+
+        num_slacks = sum(~self.eppci.non_slack_bus_mask)  # ~ convert false (slack) -> true (slack) and sums true values
+        measurements_required = 2 * self.eppci["bus"].shape[0] - num_slacks
+        measurements_available = len(self.eppci.z)
+
+        if measurements_available < measurements_required:
             self.logger.error("System is not observable (cancelling)")
-            self.logger.error(f"Measurements available: {len(z)}. Measurements required: {measurements_available}")
-            raise UserWarning(f"Measurements available: {len(z)}. Measurements required: {measurements_available}")
+            self.logger.error(
+                f"Measurements available: {measurements_available}. "
+                f"Measurements required: {measurements_required}"
+            )
+            raise UserWarning(
+                f"Measurements available: {measurements_available}. "
+                f"Measurements required: {measurements_required}"
+            )
 
-    def check_result(self, current_error, cur_it):
+    def check_result(self, current_error: float, cur_it: int) -> None:
+        """
+        Check current error with the threshold value (tolerance). If the termination condition is met, then
+        self.successful is set to True and state estimation is over.
+
+        :param float current_error: Current error value.
+        :param int cur_it: Current iteration number.
+
+        :return: None
+        """
         # print output for results
         if current_error <= self.tolerance:
             self.successful = True
@@ -55,47 +93,76 @@ class BaseAlgorithm:
                 f"State Estimation not successful ({cur_it:d}/{self.max_iterations:d} iterations)"
             )
 
-    def initialize(self, eppci: ExtendedPPCI):
+    def initialize(self, eppci: ExtendedPPCI) -> None:
+        """
+        Add eppci data container to class parameter and check if the power-gird is observable.
+
+        :param ExtendedPPCI eppci: central data container with net, measurements, z-vector, etc.
+
+        :return: None
+        """
         # Check observability
         self.eppci = eppci
         self.pp_meas_indices = eppci.pp_meas_indices
-        self.check_observability(eppci, eppci.z)
+        self.check_observability()
 
     def estimate(self, eppci: ExtendedPPCI, **kwargs):
-        # Must be implemented individually!!
-        pass
+        raise NotImplementedError("This method must be implemented in the subclass!")
 
 
 class WLSAlgorithm(BaseAlgorithm):
-    def __init__(self, tolerance, maximum_iterations, logger=std_logger):
+    def __init__(self, tolerance: float, maximum_iterations: int, logger: logging.Logger = std_logger) -> None:
+        """
+        Initialize the wls algorithm for state estimation.
+
+        :param float tolerance: Convergence threshold value.
+        :param int maximum_iterations: maximum number of iterations allowed for converge.
+        :param logging.Logger logger: Logger instance
+
+        :return: None
+        """
+        # Initialize base algorithm
         super(WLSAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
 
         # Parameters for Bad data detection
-        self.R_inv = None
-        self.Gm = None
-        self.r = None
-        self.H = None
-        self.hx = None
-        self.iterations = None
-        self.obj_func = None
+        self.R_inv = None  # weighting matrix R^{-1}
+        self.Gm = None  # gain matrix G
+        self.r = None  # residual z-h(x)
+        self.H = None  # Jacobian matrix
+        self.hx = None  # calculated measurements h(x)
+        self.obj_func = None  # objective function J(x)
 
-    def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs):
+    def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs) -> ExtendedPPCI | bool:
+        """
+        Perform state estimation using the provided data container and wls.
+
+        :param ExtendedPPCI eppci: central data container with net, measurements, z-vector, etc.
+        :param bool debug_mode: Debug mode.
+
+        :return: Updated data container with estimated state variables.
+        :rtype: ExtendedPPCI | bool
+
+        """
+        # initialize eppci and check the observability
         self.initialize(eppci)
-        # matrix calculation object
+
+        # matrix calculation object for the state estimation parameter
         sem = BaseAlgebra(eppci)
 
         current_error, cur_it = 100., 0
         # invert covariance matrix
+        # Very small standard deviations are capped to prevent the weighting from becoming infinitely large.
         eppci.r_cov[eppci.r_cov<(10**(-5))] = 10**(-5)
-        r_weight = 1 / eppci.r_cov ** 2
+        r_weight = 1 / eppci.r_cov ** 2  # individual weights
         len_r = np.arange(len(r_weight))
-        r_inv = csr_matrix((r_weight, (len_r, len_r)))
-        E = eppci.E
+        r_inv = csr_matrix((r_weight, (len_r, len_r)))  # diagonal matrix
+        E = eppci.E  # current state vector E=x=[theta_2, ..., V_1, ...]^{T}
+        obj_func = None  # J(x) objective function
         while current_error > self.tolerance and cur_it < self.max_iterations:
             # self.logger.debug("Starting iteration {:d}".format(1 + cur_it))
             try:
                 # residual r
-                r = csr_matrix(sem.create_rx(E)).T
+                r = csr_matrix(sem.create_rx(E)).T  # csr_matrix stores only the non-zero values
 
                 # jacobian matrix H
                 H = csr_matrix(sem.create_hx_jacobian(E))
@@ -120,10 +187,12 @@ class WLSAlgorithm(BaseAlgorithm):
 
                 # state vector difference d_E
                 # d_E = G_m^-1 * (H' * R^-1 * r)
-                d_E = spsolve(G_m, H.T * (r_inv * r))
+                d_E = spsolve(G_m, H.T * (r_inv * r))  # It does not explicitly compute G_m^{-1}.
+                # It solves the system of equations directly.
 
                 # Scaling of Delta_X to avoid divergence due o ill-conditioning and 
                 # operating conditions far from starting state variables
+                # ToDo: check the value .35
                 current_error = np.max(np.abs(d_E))
                 if current_error > 0.35:
                     d_E = d_E*0.35/current_error
@@ -133,7 +202,7 @@ class WLSAlgorithm(BaseAlgorithm):
                 eppci.update_E(E)
 
                 if debug_mode:
-                    obj_func = (r.T*r_inv*r)[0,0]
+                    obj_func = (r.T*r_inv*r)[0,0]  # J(x) = r^{T}R^{-1}r
                     self.logger.debug("Current delta_x: {:.7f}".format(current_error))
                     self.logger.debug("Current objective function value: {:.1f}".format(obj_func))
 
@@ -235,6 +304,139 @@ class WLSZeroInjectionConstraintsAlgorithm(BaseAlgorithm):
         # check if the estimation is successfull
         self.check_result(current_error, cur_it)
         return eppci
+
+
+class LAVAlgorithm(BaseAlgorithm):
+    def __init__(self, tolerance: float, maximum_iterations: int, logger: logging.Logger = std_logger) -> None:
+        """
+        Initialize the wls algorithm for state estimation.
+
+        :param float tolerance: Convergence threshold value.
+        :param int maximum_iterations: maximum number of iterations allowed for converge.
+        :param logging.Logger logger: Logger instance
+
+        :return: None
+        """
+        # Initialize base algorithm
+        super(LAVAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
+
+        # store results for diagnostics
+        self.r = None  # residual z-h(x)
+        self.H = None  # Jacobian matrix
+        self.hx = None  # calculated measurements h(x)
+        self.obj_func = None  # objective function J(x)
+
+    def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs) -> ExtendedPPCI | bool:
+        """
+        Perform state estimation using the provided data container and wls.
+
+        :param ExtendedPPCI eppci: central data container with net, measurements, z-vector, etc.
+        :param bool debug_mode: Debug mode.
+
+        :return: Updated data container with estimated state variables.
+        :rtype: ExtendedPPCI | bool
+
+        """
+        # initialize eppci and check the observability
+        self.initialize(eppci)
+
+        # matrix calculation object for the state estimation parameter
+        sem = BaseAlgebra(eppci)
+        current_error, cur_it = 100., 0
+        E = eppci.E
+
+        while current_error > self.tolerance and cur_it < self.max_iterations:
+            try:
+                # residual r=z-h(x)
+                r = np.asarray(sem.create_rx(E)).reshape(-1)
+                # create Jacobian matrix
+                H = np.asarray(sem.create_hx_jacobian(E))
+                # m number of measurements, n number of state variable
+                m, n = H.shape
+
+                # We solve:
+                # min sum(u_i)
+                # subject to:
+                # -u_i <= r_i - H_i * dE <= u_i
+                #
+                # Variable vector:
+                # y = [dE_1, ..., dE_n, u_1, ..., u_m]
+
+                c = np.r_[np.zeros(n), np.ones(m)]
+
+                # Constraint:
+                # r - H dE <= u
+                # -H dE - u <= -r
+                A1 = np.hstack([-H, -np.eye(m)])
+                b1 = -r
+
+                # Constraint:
+                # -(r - H dE) <= u
+                # H dE - u <= r
+                A2 = np.hstack([H, -np.eye(m)])
+                b2 = r
+
+                A_ub = np.vstack([A1, A2])
+                b_ub = np.r_[b1, b2]
+
+                # u_i >= 0, dE free
+                bounds = [(None, None)] * n + [(0, None)] * m
+
+                result = linprog(
+                    c,
+                    A_ub=A_ub,
+                    b_ub=b_ub,
+                    bounds=bounds,
+                    method="highs"
+                )
+
+                if not result.success:
+                    self.logger.error(f"LAV optimization failed: {result.message}")
+                    return False
+
+                d_E = result.x[:n]
+
+                current_error = np.max(np.abs(d_E))
+
+                # Optional step limiting
+                if current_error > 0.35:
+                    d_E = d_E * 0.35 / current_error
+
+                # Update state vector
+                E += d_E
+                eppci.update_E(E)
+
+                if debug_mode:
+                    self.obj_func = result.fun
+                    self.logger.debug(f"Current delta_x: {current_error:.7f}")
+                    self.logger.debug(f"Current LAV objective value: {result.fun:.7f}")
+
+                cur_it += 1
+
+            except Exception as err:
+                self.logger.error(f"A problem appeared while running LAV estimation: {err}")
+                return False
+
+        self.check_result(current_error, cur_it)
+        self.iterations = cur_it
+
+        if self.successful:
+            self.r = np.asarray(sem.create_rx(E)).reshape(-1)
+            self.H = np.asarray(sem.create_hx_jacobian(E))
+            self.hx = sem.create_hx(eppci.E)
+
+        return eppci
+
+
+
+class WLAVAlgorithm(BaseAlgorithm):
+    def __init__(self):
+        super().__init__(self)
+        self.test = None
+
+    def test_wlav(self):
+        self.test = 'end'
+        print(f'{self.test}')
 
 
 class IRWLSAlgorithm(BaseAlgorithm):
