@@ -74,6 +74,11 @@ def estimate(
                     e.g. if one of the bus among the buses connected through bb switch is given, then all of them will \
                     still be fused
 
+        debug_mode (bool):
+
+    Keyword Args:
+        linprog_method (Literal["highs", "highs-ds", "highs-ipm"]): supported for algorithm='lav'
+
     Returns:
         bool: Was the state estimation successful?
     """

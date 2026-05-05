@@ -4,7 +4,11 @@
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
 import numpy as np
-from scipy.sparse import csr_matrix, vstack, hstack
+
+from numpy.typing import NDArray
+from typing import Literal, Union
+
+from scipy.sparse import csr_matrix, vstack, hstack, spmatrix
 from scipy.sparse.linalg import spsolve, norm, inv
 from scipy.optimize import linprog
 
@@ -21,17 +25,20 @@ std_logger.setLevel(logging.DEBUG)
 
 __all__ = ["WLSAlgorithm", "WLSZeroInjectionConstraintsAlgorithm", "IRWLSAlgorithm"]
 
+LinprogMethod = Literal["highs", "highs-ds", "highs-ipm"]
+_ALLOWED_LINPROG_METHODS = {"highs", "highs-ds", "highs-ipm"}
+ArrayLike = Union[NDArray[np.float64], spmatrix]
 
 class BaseAlgorithm:
     def __init__(self, tolerance: float, maximum_iterations: int, logger: logging.Logger = std_logger) -> None:
         """
         Initialize the base algorithm.
 
-        :param float tolerance: Convergence threshold value.
-        :param int maximum_iterations: maximum number of iterations allowed for converge.
-        :param logging.Logger logger: Logger instance
+        Parameters:
+            tolerance: Convergence threshold value.
+            maximum_iterations: maximum number of iterations allowed for converge.
+            logging.Logger logger: Logger instance
 
-        :return: None
         """
         self.tolerance = tolerance
         self.max_iterations = maximum_iterations
@@ -50,7 +57,6 @@ class BaseAlgorithm:
         This verifies whether the number of measurements is at least as large as the number of state variables, i.e.
         approximately 2N - number_of_slacks.
 
-        :return: None
         """
 
         if self.eppci is None:
@@ -73,13 +79,15 @@ class BaseAlgorithm:
 
     def check_result(self, current_error: float, cur_it: int) -> None:
         """
+        Checks termination condition.
+
         Check current error with the threshold value (tolerance). If the termination condition is met, then
         self.successful is set to True and state estimation is over.
 
-        :param float current_error: Current error value.
-        :param int cur_it: Current iteration number.
+        Parameters:
+            current_error: Current error value.
+            cur_it: Current iteration number.
 
-        :return: None
         """
         # print output for results
         if current_error <= self.tolerance:
@@ -97,9 +105,9 @@ class BaseAlgorithm:
         """
         Add eppci data container to class parameter and check if the power-gird is observable.
 
-        :param ExtendedPPCI eppci: central data container with net, measurements, z-vector, etc.
+        Parameters:
+            eppci: central data container with net, measurements, z-vector, etc.
 
-        :return: None
         """
         # Check observability
         self.eppci = eppci
@@ -115,16 +123,16 @@ class WLSAlgorithm(BaseAlgorithm):
         """
         Initialize the wls algorithm for state estimation.
 
-        :param float tolerance: Convergence threshold value.
-        :param int maximum_iterations: maximum number of iterations allowed for converge.
-        :param logging.Logger logger: Logger instance
+        Parameters:
+            tolerance: Convergence threshold value.
+            maximum_iterations: maximum number of iterations allowed for converge.
+            logging.Logger logger: Logger instance
 
-        :return: None
         """
         # Initialize base algorithm
         super(WLSAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
 
-        # Parameters for Bad data detection
+        # Parameters for Bad data detection Todo: find/link bad data detection
         self.R_inv = None  # weighting matrix R^{-1}
         self.Gm = None  # gain matrix G
         self.r = None  # residual z-h(x)
@@ -136,11 +144,15 @@ class WLSAlgorithm(BaseAlgorithm):
         """
         Perform state estimation using the provided data container and wls.
 
-        :param ExtendedPPCI eppci: central data container with net, measurements, z-vector, etc.
-        :param bool debug_mode: Debug mode.
+        Parameters:
+            eppci: central data container with net, measurements, z-vector, etc.
+            debug_mode: Debug mode.
 
-        :return: Updated data container with estimated state variables.
-        :rtype: ExtendedPPCI | bool
+        Keyword Arguments:
+            unused
+
+        Returns:
+            Updated data container with estimated state variables.
 
         """
         # initialize eppci and check the observability
@@ -311,11 +323,13 @@ class LAVAlgorithm(BaseAlgorithm):
         """
         Initialize the wls algorithm for state estimation.
 
-        :param float tolerance: Convergence threshold value.
-        :param int maximum_iterations: maximum number of iterations allowed for converge.
-        :param logging.Logger logger: Logger instance
+        longer description
 
-        :return: None
+        Parameters:
+            tolerance: Convergence threshold value.
+            maximum_iterations: maximum number of iterations allowed for converge.
+            logging.Logger logger: Logger instance
+
         """
         # Initialize base algorithm
         super(LAVAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
@@ -326,15 +340,60 @@ class LAVAlgorithm(BaseAlgorithm):
         self.hx = None  # calculated measurements h(x)
         self.obj_func = None  # objective function J(x)
 
-    def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs) -> ExtendedPPCI | bool:
+    @staticmethod
+    def to_dense_auto(x: ArrayLike) -> NDArray[np.float64]:
+        """
+        Convert input to a dense NumPy array and automatically adjust its shape.
+
+        Sparse matrices are converted using ``toarray()``. Other array-like inputs
+        are converted using ``numpy.asarray``. Vector-like arrays with shape ``(n,)``,
+        ``(n, 1)``, or ``(1, n)`` are returned as one-dimensional arrays. Matrix-like
+        arrays are returned unchanged.
+
+        Parameters:
+            x: Input data, such as a NumPy array, list, or SciPy sparse matrix.
+
+        Returns:
+            Dense NumPy array. Vector-like inputs are flattened to shape ``(n,)``.
+        """
+        arr = x.toarray() if hasattr(x, "toarray") else np.asarray(x)
+        arr = np.asarray(arr, dtype=np.float64)
+
+        if arr.ndim == 0:
+            return arr.reshape(1)
+
+        if arr.ndim == 1:
+            return arr
+
+        if arr.ndim == 2 and (arr.shape[0] == 1 or arr.shape[1] == 1):
+            return arr.reshape(-1)
+
+        return arr
+
+    def estimate(
+            self,
+            eppci: ExtendedPPCI,
+            debug_mode=False,
+            linprog_method: LinprogMethod = 'highs',
+            WLAV: bool = False,
+            **kwargs
+    ) -> ExtendedPPCI | bool:
         """
         Perform state estimation using the provided data container and wls.
 
-        :param ExtendedPPCI eppci: central data container with net, measurements, z-vector, etc.
-        :param bool debug_mode: Debug mode.
+        longer description
 
-        :return: Updated data container with estimated state variables.
-        :rtype: ExtendedPPCI | bool
+        Parameters:
+            eppci: central data container with net, measurements, z-vector, etc.
+            debug_mode: Debug mode.
+            linprog_method: Method used for linear programming.
+            WLAV:
+
+        Keyword Arguments:
+            unused
+
+        Returns:
+            Updated data container with estimated state variables.
 
         """
         # initialize eppci and check the observability
@@ -348,21 +407,33 @@ class LAVAlgorithm(BaseAlgorithm):
         while current_error > self.tolerance and cur_it < self.max_iterations:
             try:
                 # residual r=z-h(x)
-                r = np.asarray(sem.create_rx(E)).reshape(-1)
+                r = LAVAlgorithm.to_dense_auto(sem.create_rx(E))
                 # create Jacobian matrix
-                H = np.asarray(sem.create_hx_jacobian(E))
-                # m number of measurements, n number of state variable
+                H = LAVAlgorithm.to_dense_auto(sem.create_hx_jacobian(E))
+                # m number of measurements -> z element R^{m}, n number of state variable
                 m, n = H.shape
 
-                # We solve:
+                # We solve (Abur - Power system state estimation: theory and implementation, 2004):
+                # min sum(abs(r_i)) -> abs non-linear -> -u_i <= r <= u_i and r_i = z_i - h_i(x)
+                # r_i -> risidual of iteration i (differenc between measurement values and model function
+                # h_i(x) is nonlinear, we like to get the best state x with an iterative linear approach
+                # r_i^{new} = z_i - h_i(x + dx) = z_i - (h_i(x) + H dx) = r_i - H_i dx
+                # -> -u_i <= r_i - H_i dx <= u_i  # Attention pandapower E = x
+
                 # min sum(u_i)
                 # subject to:
                 # -u_i <= r_i - H_i * dE <= u_i
-                #
+
+                # linprog (scipy) -> -u_i <= r_i - H_i * dE <= u_i -> 2 constraints among themselves
                 # Variable vector:
                 # y = [dE_1, ..., dE_n, u_1, ..., u_m]
-
-                c = np.r_[np.zeros(n), np.ones(m)]
+                # In the unweighted case, c_i(dE_i) = 0 and c_i(E) = 1
+                # Todo: implement WLAV correct
+                if WLAV:
+                    weights = 1.0 / np.maximum(eppci.r_cov, 1e-5)
+                    c = np.r_[np.zeros(n), weights]
+                else:
+                    c = np.r_[np.zeros(n), np.ones(m)]
 
                 # Constraint:
                 # r - H dE <= u
@@ -376,6 +447,7 @@ class LAVAlgorithm(BaseAlgorithm):
                 A2 = np.hstack([H, -np.eye(m)])
                 b2 = r
 
+                # ub stands for upper bound -> A_ub * y <= b_ub
                 A_ub = np.vstack([A1, A2])
                 b_ub = np.r_[b1, b2]
 
@@ -387,7 +459,7 @@ class LAVAlgorithm(BaseAlgorithm):
                     A_ub=A_ub,
                     b_ub=b_ub,
                     bounds=bounds,
-                    method="highs"
+                    method=linprog_method
                 )
 
                 if not result.success:
@@ -396,7 +468,7 @@ class LAVAlgorithm(BaseAlgorithm):
 
                 d_E = result.x[:n]
 
-                current_error = np.max(np.abs(d_E))
+                current_error = float(np.max(np.abs(d_E)))
 
                 # Optional step limiting
                 if current_error > 0.35:
