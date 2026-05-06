@@ -15,9 +15,9 @@ from pandapower.create import create_empty_network, create_bus, create_ext_grid,
 from pandapower.estimation import chi2_analysis, remove_bad_data, estimate
 from pandapower.auxiliary import pandapowerNet
 # from pandapower.file_io import from_json
-# from pandapower.networks.cigre_networks import create_cigre_network_mv
+from pandapower.networks.cigre_networks import create_cigre_network_mv
 # from pandapower.networks.power_system_test_cases import case9
-# from pandapower.run import runpp
+from pandapower.run import runpp
 # from pandapower.std_types import create_std_type
 
 
@@ -67,6 +67,10 @@ def _create_2bus_test_net() -> pandapowerNet:
     create_measurement(net, 'v', 'bus', 1.04, 0.1, 1)
 
     return net
+
+
+def _r(v=0.03):
+    return np.random.normal(1.0, v)
 
 
 def test_2bus_lav_wlav() -> None:
@@ -134,3 +138,43 @@ def test_2bus_lav_wlav() -> None:
     # Known LAV reference (empirically determined)
     target_v_lav = np.array([1.019, 1.04])
     target_delta_lav = np.array([0.0, 4.5479048])
+
+
+def test_cigre_network(init='flat'):
+    # 1. create network
+    # test the mv ring network with all available voltage measurements and bus powers
+    # test if switches and transformer will work correctly with the state estimation
+    np.random.seed(123456)
+    net = create_cigre_network_mv(with_der=False)
+    runpp(net)
+
+    for bus, row in net.res_bus.iterrows():
+        create_measurement(net, "v", "bus", row.vm_pu * _r(.0), 0.01, bus)
+        # if np.random.randint(0, 4) == 0:
+        #    continue
+        create_measurement(
+            net=net,
+            meas_type="p",
+            element_type="bus",
+            value=row.p_mw * _r(.0),
+            std_dev=max(0.001, abs(0.03 * row.p_mw)),
+            element=bus
+        )
+        create_measurement(net, "q", "bus", row.q_mvar * _r(.0), max(0.001, abs(0.03 * row.q_mvar)),
+                           bus)
+
+    # 2. Do state estimation
+    if not estimate(net, algorithm='lav', init="flat", wlav=False):
+        raise AssertionError('LAV estimation failed!')
+        raise AssertionError("Estimation failed!")
+
+    v_result = net.res_bus_est.vm_pu.values
+    delta_result = net.res_bus_est.va_degree.values
+
+    target_v = net.res_bus.vm_pu.values
+    diff_v = target_v - v_result
+    target_delta = net.res_bus.va_degree.values
+    diff_delta = target_delta - delta_result
+
+    assert (np.nanmax(abs(diff_v)) < 0.0043)
+    assert (np.nanmax(abs(diff_delta)) < 0.2)
