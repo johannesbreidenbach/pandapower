@@ -10,7 +10,6 @@ from scipy.stats import chi2
 from pandapower.estimation.algorithm.base import (WLSAlgorithm,
                                                   WLSZeroInjectionConstraintsAlgorithm,
                                                   LAVAlgorithm,
-                                                  WLAVAlgorithm,
                                                   IRWLSAlgorithm,
                                                   AFWLSAlgorithm)
 from pandapower.estimation.algorithm.lp import LPAlgorithm
@@ -25,7 +24,6 @@ std_logger = logging.getLogger(__name__)
 ALGORITHM_MAPPING = {'wls': WLSAlgorithm,
                      'wls_with_zero_constraint': WLSZeroInjectionConstraintsAlgorithm,
                      'lav':LAVAlgorithm,
-                     'wlav':WLAVAlgorithm,
                      'opt': OptAlgorithm,
                      'irwls': IRWLSAlgorithm,
                      'lp': LPAlgorithm,
@@ -78,6 +76,7 @@ def estimate(
 
     Keyword Args:
         linprog_method (Literal["highs", "highs-ds", "highs-ipm"]): supported for algorithm='lav'
+        wlav (bool): Perform LAV with weights.
 
     Returns:
         bool: Was the state estimation successful?

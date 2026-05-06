@@ -56,7 +56,6 @@ class BaseAlgorithm:
 
         This verifies whether the number of measurements is at least as large as the number of state variables, i.e.
         approximately 2N - number_of_slacks.
-
         """
 
         if self.eppci is None:
@@ -87,7 +86,6 @@ class BaseAlgorithm:
         Parameters:
             current_error: Current error value.
             cur_it: Current iteration number.
-
         """
         # print output for results
         if current_error <= self.tolerance:
@@ -126,8 +124,7 @@ class WLSAlgorithm(BaseAlgorithm):
         Parameters:
             tolerance: Convergence threshold value.
             maximum_iterations: maximum number of iterations allowed for converge.
-            logging.Logger logger: Logger instance
-
+            logger: Logger instance
         """
         # Initialize base algorithm
         super(WLSAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
@@ -153,7 +150,6 @@ class WLSAlgorithm(BaseAlgorithm):
 
         Returns:
             Updated data container with estimated state variables.
-
         """
         # initialize eppci and check the observability
         self.initialize(eppci)
@@ -321,15 +317,17 @@ class WLSZeroInjectionConstraintsAlgorithm(BaseAlgorithm):
 class LAVAlgorithm(BaseAlgorithm):
     def __init__(self, tolerance: float, maximum_iterations: int, logger: logging.Logger = std_logger) -> None:
         """
-        Initialize the wls algorithm for state estimation.
-
-        longer description
+        The algorithm solves a (weighted) 'Least Absolute Value (LAV)' optimization problem to estimate the system
+        state vector from possibly bad or noisy measurements.
 
         Parameters:
-            tolerance: Convergence threshold value.
-            maximum_iterations: maximum number of iterations allowed for converge.
-            logging.Logger logger: Logger instance
-
+            tolerance:
+                Convergence threshold for the state update ‖ΔE‖_∞. The iterative process stops once the maximum
+                absolute update is below this value.
+            maximum_iterations:
+                Maximum number of iterations allowed before the algorithm is considered not converged.
+            logger:
+                Logger instance used for diagnostic and error messages.
         """
         # Initialize base algorithm
         super(LAVAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
@@ -354,9 +352,9 @@ class LAVAlgorithm(BaseAlgorithm):
             x: Input data, such as a NumPy array, list, or SciPy sparse matrix.
 
         Returns:
-            Dense NumPy array. Vector-like inputs are flattened to shape ``(n,)``.
+            Dense NumPy array of dtype ``float64``. Vector-like inputs are flattened to shape ``(n,)``.
         """
-        arr = x.toarray() if hasattr(x, "toarray") else np.asarray(x)
+        arr = x.toarray() if hasattr(x, 'toarray') else np.asarray(x)
         arr = np.asarray(arr, dtype=np.float64)
 
         if arr.ndim == 0:
@@ -375,26 +373,50 @@ class LAVAlgorithm(BaseAlgorithm):
             eppci: ExtendedPPCI,
             debug_mode=False,
             linprog_method: LinprogMethod = 'highs',
-            WLAV: bool = False,
+            wlav: bool = False,
             **kwargs
     ) -> ExtendedPPCI | bool:
         """
-        Perform state estimation using the provided data container and wls.
+        Perform power system state estimation using the (W)LAV formulation.
 
-        longer description
+        The method solves an iterative linear programming problem based on the linearized measurement model
+            r = z - h(x),  r_new ≈ r - H ΔE,
+
+        where the objective is to minimize the (weighted) 1-norm of the residuals
+            min Σ_i w_i |r_i|.
+
+        In each iteration, a linear program is solved via ``scipy.optimize.linprog`` to obtain the state update ΔE.
+        The state vector ``E`` inside ``eppci`` is updated in-place.
 
         Parameters:
-            eppci: central data container with net, measurements, z-vector, etc.
-            debug_mode: Debug mode.
-            linprog_method: Method used for linear programming.
-            WLAV:
+            eppci:
+                Central data container (ExtendedPPCI) containing the network model, measurements, current state vector
+                ``E``, measurement vector ``z``, and (optionally) covariance information ``r_cov`` for WLAV.
+            debug_mode:
+                If ``True``, additional diagnostic information is logged, including the current state update norm and
+                the current LAV objective value.
+            linprog_method:
+                Method name passed to ``scipy.optimize.linprog`` (e.g. ``"highs"``).
+            wlav:
+                If ``True``, perform weighted LAV, where the weights are computed as ``1 / sigma`` with
+                ``sigma = max(r_cov, 1e-5)``. If ``False``, all measurements are weighted equally.
 
         Keyword Arguments:
-            unused
+            **kwargs:
+                Currently unused. Present for API compatibility and possible future extensions.
 
         Returns:
-            Updated data container with estimated state variables.
+            ExtendedPPCI | bool:
+                The updated data container with the estimated state variables if the optimization is successful.
+                Additionally, on success the following attributes are populated for diagnostics:
 
+                * ``self.r``: final residual vector ``z - h(E)``
+                * ``self.H``: final Jacobian matrix at the estimated state
+                * ``self.hx``: final calculated measurements ``h(E)``
+                * ``self.obj_func``: final LAV objective value
+                * ``self.iterations``: number of iterations performed
+
+                Returns ``False`` if the optimization fails or an exception occurs.
         """
         # initialize eppci and check the observability
         self.initialize(eppci)
@@ -428,12 +450,13 @@ class LAVAlgorithm(BaseAlgorithm):
                 # Variable vector:
                 # y = [dE_1, ..., dE_n, u_1, ..., u_m]
                 # In the unweighted case, c_i(dE_i) = 0 and c_i(E) = 1
-                # Todo: implement WLAV correct
-                if WLAV:
-                    weights = 1.0 / np.maximum(eppci.r_cov, 1e-5)
-                    c = np.r_[np.zeros(n), weights]
+                if wlav:
+                    # check that sigma is not smaller than 1e-5 to prevent 1/0
+                    sigma = np.maximum(LAVAlgorithm.to_dense_auto(eppci.r_cov), 1e-5)
+                    weights = 1.0 / sigma
                 else:
-                    c = np.r_[np.zeros(n), np.ones(m)]
+                    weights = np.ones(m)
+                c = np.r_[np.zeros(n), weights]
 
                 # Constraint:
                 # r - H dE <= u
@@ -463,7 +486,7 @@ class LAVAlgorithm(BaseAlgorithm):
                 )
 
                 if not result.success:
-                    self.logger.error(f"LAV optimization failed: {result.message}")
+                    self.logger.error(f'LAV optimization failed: {result.message}')
                     return False
 
                 d_E = result.x[:n]
@@ -471,7 +494,7 @@ class LAVAlgorithm(BaseAlgorithm):
                 current_error = float(np.max(np.abs(d_E)))
 
                 # Optional step limiting
-                if current_error > 0.35:
+                if current_error > 0.35:  # 50Hz-Project (large grid) value by flat start to prevent big jumps
                     d_E = d_E * 0.35 / current_error
 
                 # Update state vector
@@ -480,13 +503,13 @@ class LAVAlgorithm(BaseAlgorithm):
 
                 if debug_mode:
                     self.obj_func = result.fun
-                    self.logger.debug(f"Current delta_x: {current_error:.7f}")
-                    self.logger.debug(f"Current LAV objective value: {result.fun:.7f}")
+                    self.logger.debug(f'Current delta_x: {current_error:.7f}')
+                    self.logger.debug(f'Current LAV objective value: {result.fun:.7f}')
 
                 cur_it += 1
 
             except Exception as err:
-                self.logger.error(f"A problem appeared while running LAV estimation: {err}")
+                self.logger.error(f'A problem appeared while running LAV estimation: {err}')
                 return False
 
         self.check_result(current_error, cur_it)
@@ -498,17 +521,6 @@ class LAVAlgorithm(BaseAlgorithm):
             self.hx = sem.create_hx(eppci.E)
 
         return eppci
-
-
-
-class WLAVAlgorithm(BaseAlgorithm):
-    def __init__(self):
-        super().__init__(self)
-        self.test = None
-
-    def test_wlav(self):
-        self.test = 'end'
-        print(f'{self.test}')
 
 
 class IRWLSAlgorithm(BaseAlgorithm):
