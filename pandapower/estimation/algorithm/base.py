@@ -129,7 +129,7 @@ class WLSAlgorithm(BaseAlgorithm):
         # Initialize base algorithm
         super(WLSAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
 
-        # Parameters for Bad data detection Todo: find/link bad data detection
+        # Parameters for Bad data detection and removing in state_estimation.py -> remove_bad_data()
         self.R_inv = None  # weighting matrix R^{-1}
         self.Gm = None  # gain matrix G
         self.r = None  # residual z-h(x)
@@ -200,8 +200,7 @@ class WLSAlgorithm(BaseAlgorithm):
 
                 # Scaling of Delta_X to avoid divergence due o ill-conditioning and 
                 # operating conditions far from starting state variables
-                # ToDo: check the value .35
-                current_error = np.max(np.abs(d_E))
+                current_error = float(np.max(np.abs(d_E)))
                 if current_error > 0.35:
                     d_E = d_E*0.35/current_error
 
@@ -493,8 +492,11 @@ class LAVAlgorithm(BaseAlgorithm):
 
                 current_error = float(np.max(np.abs(d_E)))
 
-                # Optional step limiting
-                if current_error > 0.35:  # 50Hz-Project (large grid) value by flat start to prevent big jumps
+                # Optional step limiting:
+                # This factor was derived from the 50 Hz project, where a flat start in large-scale grids caused
+                # excessively large state updates (dE). Limiting the step to 0.35 helps prevent those large jumps during
+                # the first iterations.
+                if current_error > 0.35:  # 50Hz project heuristic to limit excessive state updates
                     d_E = d_E * 0.35 / current_error
 
                 # Update state vector
@@ -514,6 +516,10 @@ class LAVAlgorithm(BaseAlgorithm):
 
         self.check_result(current_error, cur_it)
         self.iterations = cur_it
+
+        if debug_mode:
+            print(f'number of required iterations: {cur_it} of {self.max_iterations}')
+            print(f'current_error = {current_error}, threshold = {self.tolerance}')
 
         if self.successful:
             self.r = np.asarray(sem.create_rx(E)).reshape(-1)
