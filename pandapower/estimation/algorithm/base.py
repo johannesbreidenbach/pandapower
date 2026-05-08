@@ -5,16 +5,13 @@
 
 import numpy as np
 
-from numpy.typing import NDArray
-from typing import Literal, Union
 
-from scipy.sparse import csr_matrix, vstack, hstack, spmatrix
+from scipy.sparse import csr_matrix, vstack, hstack
 from scipy.sparse.linalg import spsolve, norm, inv
-from scipy.optimize import linprog
+
 
 from pandapower.estimation.algorithm.estimator import BaseEstimatorIRWLS, get_estimator
-from pandapower.estimation.algorithm.matrix_base import BaseAlgebra, \
-    BaseAlgebraZeroInjConstraints
+from pandapower.estimation.algorithm.matrix_base import BaseAlgebra, BaseAlgebraZeroInjConstraints
 from pandapower.estimation.idx_bus import ZERO_INJ_FLAG, P, P_STD, Q, Q_STD
 from pandapower.estimation.ppc_conversion import ExtendedPPCI
 from pandapower.pypower.idx_bus import bus_cols
@@ -24,10 +21,6 @@ std_logger = logging.getLogger(__name__)
 std_logger.setLevel(logging.DEBUG)
 
 __all__ = ["WLSAlgorithm", "WLSZeroInjectionConstraintsAlgorithm", "IRWLSAlgorithm"]
-
-LinprogMethod = Literal["highs", "highs-ds", "highs-ipm"]
-_ALLOWED_LINPROG_METHODS = {"highs", "highs-ds", "highs-ipm"}
-ArrayLike = Union[NDArray[np.float64], spmatrix]
 
 class BaseAlgorithm:
     def __init__(self, tolerance: float, maximum_iterations: int, logger: logging.Logger = std_logger) -> None:
@@ -313,222 +306,6 @@ class WLSZeroInjectionConstraintsAlgorithm(BaseAlgorithm):
         return eppci
 
 
-class LAVAlgorithm(BaseAlgorithm):
-    def __init__(self, tolerance: float, maximum_iterations: int, logger: logging.Logger = std_logger) -> None:
-        """
-        The algorithm solves a (weighted) 'Least Absolute Value (LAV)' optimization problem to estimate the system
-        state vector from possibly bad or noisy measurements.
-
-        Parameters:
-            tolerance:
-                Convergence threshold for the state update ‖ΔE‖_∞. The iterative process stops once the maximum
-                absolute update is below this value.
-            maximum_iterations:
-                Maximum number of iterations allowed before the algorithm is considered not converged.
-            logger:
-                Logger instance used for diagnostic and error messages.
-        """
-        # Initialize base algorithm
-        super(LAVAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
-
-        # store results for diagnostics
-        self.r = None  # residual z-h(x)
-        self.H = None  # Jacobian matrix
-        self.hx = None  # calculated measurements h(x)
-        self.obj_func = None  # objective function J(x)
-
-    @staticmethod
-    def to_dense_auto(x: ArrayLike) -> NDArray[np.float64]:
-        """
-        Convert input to a dense NumPy array and automatically adjust its shape.
-
-        Sparse matrices are converted using ``toarray()``. Other array-like inputs
-        are converted using ``numpy.asarray``. Vector-like arrays with shape ``(n,)``,
-        ``(n, 1)``, or ``(1, n)`` are returned as one-dimensional arrays. Matrix-like
-        arrays are returned unchanged.
-
-        Parameters:
-            x: Input data, such as a NumPy array, list, or SciPy sparse matrix.
-
-        Returns:
-            Dense NumPy array of dtype ``float64``. Vector-like inputs are flattened to shape ``(n,)``.
-        """
-        arr = x.toarray() if hasattr(x, 'toarray') else np.asarray(x)
-        arr = np.asarray(arr, dtype=np.float64)
-
-        if arr.ndim == 0:
-            return arr.reshape(1)
-
-        if arr.ndim == 1:
-            return arr
-
-        if arr.ndim == 2 and (arr.shape[0] == 1 or arr.shape[1] == 1):
-            return arr.reshape(-1)
-
-        return arr
-
-    def estimate(
-            self,
-            eppci: ExtendedPPCI,
-            debug_mode=False,
-            linprog_method: LinprogMethod = 'highs',
-            wlav: bool = False,
-            **kwargs
-    ) -> ExtendedPPCI | bool:
-        """
-        Perform power system state estimation using the (W)LAV formulation.
-
-        The method solves an iterative linear programming problem based on the linearized measurement model
-            r = z - h(x),  r_new ≈ r - H ΔE,
-
-        where the objective is to minimize the (weighted) 1-norm of the residuals
-            min Σ_i w_i |r_i|.
-
-        In each iteration, a linear program is solved via ``scipy.optimize.linprog`` to obtain the state update ΔE.
-        The state vector ``E`` inside ``eppci`` is updated in-place.
-
-        Parameters:
-            eppci:
-                Central data container (ExtendedPPCI) containing the network model, measurements, current state vector
-                ``E``, measurement vector ``z``, and (optionally) covariance information ``r_cov`` for WLAV.
-            debug_mode:
-                If ``True``, additional diagnostic information is logged, including the current state update norm and
-                the current LAV objective value.
-            linprog_method:
-                Method name passed to ``scipy.optimize.linprog`` (e.g. ``"highs"``).
-            wlav:
-                If ``True``, perform weighted LAV, where the weights are computed as ``1 / sigma`` with
-                ``sigma = max(r_cov, 1e-5)``. If ``False``, all measurements are weighted equally.
-
-        Keyword Arguments:
-            **kwargs:
-                Currently unused. Present for API compatibility and possible future extensions.
-
-        Returns:
-            ExtendedPPCI | bool:
-                The updated data container with the estimated state variables if the optimization is successful.
-                Additionally, on success the following attributes are populated for diagnostics:
-
-                * ``self.r``: final residual vector ``z - h(E)``
-                * ``self.H``: final Jacobian matrix at the estimated state
-                * ``self.hx``: final calculated measurements ``h(E)``
-                * ``self.obj_func``: final LAV objective value
-                * ``self.iterations``: number of iterations performed
-
-                Returns ``False`` if the optimization fails or an exception occurs.
-        """
-        # initialize eppci and check the observability
-        self.initialize(eppci)
-
-        # matrix calculation object for the state estimation parameter
-        sem = BaseAlgebra(eppci)
-        current_error, cur_it = 100., 0
-        E = eppci.E
-
-        while current_error > self.tolerance and cur_it < self.max_iterations:
-            try:
-                # residual r=z-h(x)
-                r = LAVAlgorithm.to_dense_auto(sem.create_rx(E))
-                # create Jacobian matrix
-                H = LAVAlgorithm.to_dense_auto(sem.create_hx_jacobian(E))
-                # m number of measurements -> z element R^{m}, n number of state variable
-                m, n = H.shape
-
-                # We solve (Abur - Power system state estimation: theory and implementation, 2004):
-                # min sum(abs(r_i)) -> abs non-linear -> -u_i <= r <= u_i and r_i = z_i - h_i(x)
-                # r_i -> risidual of iteration i (differenc between measurement values and model function
-                # h_i(x) is nonlinear, we like to get the best state x with an iterative linear approach
-                # r_i^{new} = z_i - h_i(x + dx) = z_i - (h_i(x) + H dx) = r_i - H_i dx
-                # -> -u_i <= r_i - H_i dx <= u_i  # Attention pandapower E = x
-
-                # min sum(u_i)
-                # subject to:
-                # -u_i <= r_i - H_i * dE <= u_i
-
-                # linprog (scipy) -> -u_i <= r_i - H_i * dE <= u_i -> 2 constraints among themselves
-                # Variable vector:
-                # y = [dE_1, ..., dE_n, u_1, ..., u_m]
-                # In the unweighted case, c_i(dE_i) = 0 and c_i(E) = 1
-                if wlav:
-                    # check that sigma is not smaller than 1e-5 to prevent 1/0
-                    sigma = np.maximum(LAVAlgorithm.to_dense_auto(eppci.r_cov), 1e-5)
-                    weights = 1.0 / sigma
-                else:
-                    weights = np.ones(m)
-                c = np.r_[np.zeros(n), weights]
-
-                # Constraint:
-                # r - H dE <= u
-                # -H dE - u <= -r
-                A1 = np.hstack([-H, -np.eye(m)])
-                b1 = -r
-
-                # Constraint:
-                # -(r - H dE) <= u
-                # H dE - u <= r
-                A2 = np.hstack([H, -np.eye(m)])
-                b2 = r
-
-                # ub stands for upper bound -> A_ub * y <= b_ub
-                A_ub = np.vstack([A1, A2])
-                b_ub = np.r_[b1, b2]
-
-                # u_i >= 0, dE free
-                bounds = [(None, None)] * n + [(0, None)] * m
-
-                result = linprog(
-                    c,
-                    A_ub=A_ub,
-                    b_ub=b_ub,
-                    bounds=bounds,
-                    method=linprog_method
-                )
-
-                if not result.success:
-                    self.logger.error(f'LAV optimization failed: {result.message}')
-                    return False
-
-                d_E = result.x[:n]
-
-                current_error = float(np.max(np.abs(d_E)))
-
-                # Optional step limiting:
-                # This factor was derived from the 50 Hz project, where a flat start in large-scale grids caused
-                # excessively large state updates (dE). Limiting the step to 0.35 helps prevent those large jumps during
-                # the first iterations.
-                if current_error > 0.35:  # 50Hz project heuristic to limit excessive state updates
-                    d_E = d_E * 0.35 / current_error
-
-                # Update state vector
-                E += d_E
-                eppci.update_E(E)
-
-                if debug_mode:
-                    self.obj_func = result.fun
-                    self.logger.debug(f'Current delta_x: {current_error:.7f}')
-                    self.logger.debug(f'Current LAV objective value: {result.fun:.7f}')
-
-                cur_it += 1
-
-            except Exception as err:
-                self.logger.error(f'A problem appeared while running LAV estimation: {err}')
-                return False
-
-        self.check_result(current_error, cur_it)
-        self.iterations = cur_it
-
-        if debug_mode:
-            print(f'number of required iterations: {cur_it} of {self.max_iterations}')
-            print(f'current_error = {current_error}, threshold = {self.tolerance}')
-
-        if self.successful:
-            self.r = np.asarray(sem.create_rx(E)).reshape(-1)
-            self.H = np.asarray(sem.create_hx_jacobian(E))
-            self.hx = sem.create_hx(eppci.E)
-
-        return eppci
-
-
 class IRWLSAlgorithm(BaseAlgorithm):
     def estimate(self, eppci: ExtendedPPCI, estimator="wls", **kwargs):
         self.initialize(eppci)
@@ -574,24 +351,79 @@ class IRWLSAlgorithm(BaseAlgorithm):
 
 class AFWLSAlgorithm(BaseAlgorithm):
     def __init__(self, tolerance, maximum_iterations, logger=std_logger):
+        """
+        Initialize the Allocation-Factor Weighted Least Squares (AF-WLS) algorithm.
+
+        This algorithm extends the classical WLS state estimation by augmenting the state vector with additional
+        cluster/allocation-factor variables. These additional variables are estimated together with the electrical state
+        variables.
+
+        Parameters:
+            tolerance:
+                Convergence threshold for the state update ‖ΔE‖_∞. The iterative process stops once the maximum absolute
+                update is below this value.
+            maximum_iterations:
+                Maximum number of iterations allowed before the algorithm is considered not converged.
+            logger:
+                Logger instance used for diagnostic and error messages.
+        """
+        # Initialize base algorithm
         super(AFWLSAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
 
         # Parameters for Bad data detection
-        self.R_inv = None
-        self.Gm = None
-        self.r = None
-        self.H = None
-        self.hx = None
-        self.iterations = None
-        self.obj_func = None
+        self.R_inv = None  # weighting matrix R^{-1}
+        self.Gm = None  # gain matrix G
+        self.r = None  # residual z-h(x)
+        self.H = None  # Jacobian matrix
+        self.hx = None  # calculated measurements h(x)
+        self.obj_func = None  # objective function J(x)
 
     def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs):
+        """
+        Perform augmented weighted least squares state estimation.
+
+        The AF-WLS algorithm estimates both the classical electrical state variables and additional allocation-factor or
+        cluster variables. Therefore, the state vector is assumed to have the form
+            E = [theta, V, alpha_1, ..., alpha_k]^T,
+        where ``theta`` and ``V`` are the usual voltage angle and magnitude state variables, while ``alpha_i`` are
+        cluster/allocation-factor variables.
+
+        In each iteration, the nonlinear measurement model is linearized around the current state estimate:
+            r = z - h(E)
+            r_new ≈ r - H ΔE
+
+        The weighted least squares update is then computed by solving
+            (H^T R^{-1} H) ΔE = H^T R^{-1} r,
+        without explicitly inverting the gain matrix.
+
+        At the end of the estimation, the augmented state vector is split into:
+            * the electrical state vector, which is written back via ``eppci.update_E()``
+            * the cluster/allocation-factor vector, which is stored in ``eppci.clusters``
+
+        Parameters:
+            eppci:
+                Central data container containing the network model, measurements, measurement covariance, current
+                augmented state vector ``E``, and cluster/allocation-factor information.
+            debug_mode:
+                If ``True``, additional diagnostic information is logged, including the current state update norm,
+                objective function value, and possible ill-conditioning of the gain matrix.
+
+        Keyword Arguments:
+            **kwargs: Currently unused. Present for API compatibility and possible future extensions.
+
+        Returns:
+            ExtendedPPCI | bool:
+                The updated data container with estimated electrical state variables and cluster/allocation factors if
+                the estimation succeeds. Returns ``False`` if a linear algebra error occurs.
+        """
+        # Initialize eppci and check the basic observability criterion
         self.initialize(eppci)
-        # matrix calculation object
+        # Matrix calculation object for residuals, calculated measurements and Jacobian
         sem = BaseAlgebra(eppci)
 
         current_error, cur_it = 100., 0
         # invert covariance matrix
+        # Very small standard deviations are capped to prevent the weighting from becoming infinitely large.
         eppci.r_cov[eppci.r_cov<(10**(-5))] = 10**(-5)
         r_weight = 1 / eppci.r_cov ** 2
         len_r = np.arange(len(r_weight))
@@ -623,15 +455,19 @@ class AFWLSAlgorithm(BaseAlgorithm):
                         self.logger.warning("WARNING: Gain matrix is ill-conditioned: {:.2E}".format(cond))
 
                 # state vector difference d_E
-                d_E = spsolve(G_m, H.T * (r_inv * r))
+                # d_E = G_m^-1 * (H' * R^-1 * r)
+                d_E = spsolve(G_m, H.T * (r_inv * r))  # It solves the system of equations directly.
+
+                current_error = float(np.max(np.abs(d_E)))
+                # if current_error > 0.35:
+                #     d_E = d_E * 0.35 / current_error
 
                 # Update E with d_E
                 E += d_E.ravel()
 
-                # log data 
-                current_error = np.max(np.abs(d_E))
+                # log data
                 if debug_mode:
-                    obj_func = (r.T*r_inv*r)[0,0]
+                    obj_func = (r.T*r_inv*r)[0,0]  # J(x) = r^{T}R^{-1}r
                     self.logger.debug("Current delta_x: {:.7f}".format(current_error))
                     self.logger.debug("Current objective function value: {:.1f}".format(obj_func))
 

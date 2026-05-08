@@ -116,10 +116,10 @@ def test_2bus_lav_wlav() -> None:
     net_wls = _create_2bus_test_net()
 
     # Run estimations
-    if not estimate(net_lav, algorithm='lav', init='flat', wlav=False):
+    if not estimate(net_lav, algorithm='lp', wlav=False, with_ortools=False, init='flat'):
         raise AssertionError('LAV estimation failed!')
 
-    if not estimate(net_wlav, algorithm='lav', init='flat', wlav=True):
+    if not estimate(net_wlav, algorithm='lp', wlav=True, with_ortools=False, init='flat'):
         raise AssertionError('WLAV estimation failed!')
 
     if not estimate(net_wls, init='flat'):
@@ -212,7 +212,9 @@ def test_cigre_network(init='flat'):
 
     # 3. create copies for each estimation algorithm
     net_wls = copy.deepcopy(net_base)
+    # net_afwls = copy.deepcopy(net_base)
     net_lav = copy.deepcopy(net_base)
+    net_lp = copy.deepcopy(net_base)
     net_wlav = copy.deepcopy(net_base)
 
 
@@ -227,8 +229,17 @@ def test_cigre_network(init='flat'):
         v_wls = net_wls.res_bus_est.vm_pu.values
         delta_wls = net_wls.res_bus_est.va_degree.values
 
+    # # AF-WLS
+    # if not estimate(net_wls, algorithm='af-wls', init="flat", wlav=False):
+    #     failures.append("AF-WLS estimation failed")
+    #     v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
+    #     delta_afwls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
+    # else:
+    #     v_afwls = net_wls.res_bus_est.vm_pu.values
+    #     delta_afwls = net_wls.res_bus_est.va_degree.values
+
     # LAV
-    if not estimate(net_lav, algorithm='lav', init="flat", wlav=False, debug_mode=True):
+    if not estimate(net_lav, algorithm='lp', wlav=False, with_ortools=False, init="flat", debug_mode=False):
         failures.append("LAV estimation failed")
         v_lav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_lav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -237,7 +248,7 @@ def test_cigre_network(init='flat'):
         delta_lav = net_lav.res_bus_est.va_degree.values
 
     # WLAV
-    if not estimate(net_wlav, algorithm='lav', init="flat", wlav=True):
+    if not estimate(net_wlav, algorithm='lp', wlav=True, with_ortools=False, init="flat", debug_mode=False):
         failures.append("WLAV estimation failed")
         v_wlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_wlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)

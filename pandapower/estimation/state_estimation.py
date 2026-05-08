@@ -9,7 +9,6 @@ from scipy.stats import chi2
 
 from pandapower.estimation.algorithm.base import (WLSAlgorithm,
                                                   WLSZeroInjectionConstraintsAlgorithm,
-                                                  LAVAlgorithm,
                                                   IRWLSAlgorithm,
                                                   AFWLSAlgorithm)
 from pandapower.estimation.algorithm.lp import LPAlgorithm
@@ -23,7 +22,6 @@ std_logger = logging.getLogger(__name__)
 
 ALGORITHM_MAPPING = {'wls': WLSAlgorithm,
                      'wls_with_zero_constraint': WLSZeroInjectionConstraintsAlgorithm,
-                     'lav':LAVAlgorithm,
                      'opt': OptAlgorithm,
                      'irwls': IRWLSAlgorithm,
                      'lp': LPAlgorithm,
