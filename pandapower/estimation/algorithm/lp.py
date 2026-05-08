@@ -28,14 +28,14 @@ ArrayLike = Union[NDArray[np.float64], spmatrix]
 
 class LPAlgorithm(BaseAlgorithm):
     def __init__(self, tolerance: float, maximum_iterations: int, logger: logging.Logger = std_logger) -> None:
-        """
+        r"""
         The algorithm solves a (weighted) 'Least Absolute Value (LAV)' optimization problem to estimate the system
         state vector from possibly bad or noisy measurements.
 
         Parameters:
             tolerance:
-                Convergence threshold for the state update ‖ΔE‖_∞. The iterative process stops once the maximum
-                absolute update is below this value.
+                Convergence threshold for the state update :math:`\lVert \Delta E \rVert_{\infty}`. The iterative
+                process stops once the maximum absolute update is below this value.
             maximum_iterations:
                 Maximum number of iterations allowed before the algorithm is considered not converged.
             logger:
@@ -59,17 +59,21 @@ class LPAlgorithm(BaseAlgorithm):
             with_ortools: bool = True,
             **kwargs
     ) -> ExtendedPPCI | bool:
-        """
+        r"""
         Perform power system state estimation using the (W)LAV formulation.
 
         The method solves an iterative linear programming problem based on the linearized measurement model
-            r = z - h(x),  r_new ≈ r - H ΔE,
+
+        .. math::
+            r = z - h(x), \quad r_{\text{new}} \approx r - H \,\Delta E,
 
         where the objective is to minimize the (weighted) 1-norm of the residuals
-            min Σ_i w_i |r_i|.
 
-        In each iteration, a linear program is solved via ``scipy.optimize.linprog`` to obtain the state update ΔE.
-        The state vector ``E`` inside ``eppci`` is updated in-place.
+        .. math::
+            \min \sum_i w_i \, \lvert r_i \rvert.
+
+        In each iteration, a linear program is solved via :func:`scipy.optimize.linprog` to obtain the state update
+        :math:`\Delta E`. The state vector ``E`` inside ``eppci`` is updated in-place.
 
         Parameters:
             eppci:
@@ -79,29 +83,27 @@ class LPAlgorithm(BaseAlgorithm):
                 If ``True``, additional diagnostic information is logged, including the current state update norm and
                 the current LAV objective value.
             linprog_method:
-                Method name passed to ``scipy.optimize.linprog`` (e.g. ``"highs"``).
+                Method name passed to :func:`scipy.optimize.linprog` (e.g. ``"highs"``).
             wlav:
                 If ``True``, perform weighted LAV, where the weights are computed as ``1 / sigma`` with
                 ``sigma = max(r_cov, 1e-5)``. If ``False``, all measurements are weighted equally.
             with_ortools:
-                If ``True``, use the OR-Tools solver (https://github.com/google/or-tools)
+                If ``True``, use the `OR-Tools solver <https://github.com/google/or-tools>`_
 
         Keyword Arguments:
-            **kwargs:
-                Currently unused. Present for API compatibility and possible future extensions.
+            **kwargs: Currently unused. Present for API compatibility and possible future extensions.
 
         Returns:
-            ExtendedPPCI | bool:
-                The updated data container with the estimated state variables if the optimization is successful.
-                Additionally, on success the following attributes are populated for diagnostics:
+            The updated data container with the estimated state variables if the optimization is successful.
+            Additionally, on success the following attributes are populated for diagnostics:
 
-                * ``self.r``: final residual vector ``z - h(E)``
-                * ``self.H``: final Jacobian matrix at the estimated state
-                * ``self.hx``: final calculated measurements ``h(E)``
-                * ``self.obj_func``: final LAV objective value
-                * ``self.iterations``: number of iterations performed
+            * ``self.r``: final residual vector :math:`z - h(E)`
+            * ``self.H``: final Jacobian matrix at the estimated state
+            * ``self.hx``: final calculated measurements :math:`h(E)`
+            * ``self.obj_func``: final LAV objective value
+            * ``self.iterations``: number of iterations performed
 
-                Returns ``False`` if the optimization fails or an exception occurs.
+            Returns ``False`` if the optimization fails or an exception occurs.
         """
         # initialize eppci and check the observability
         self.initialize(eppci)
@@ -175,10 +177,9 @@ class LPAlgorithm(BaseAlgorithm):
         """
         Convert input to a dense NumPy array and automatically adjust its shape.
 
-        Sparse matrices are converted using ``toarray()``. Other array-like inputs
-        are converted using ``numpy.asarray``. Vector-like arrays with shape ``(n,)``,
-        ``(n, 1)``, or ``(1, n)`` are returned as one-dimensional arrays. Matrix-like
-        arrays are returned unchanged.
+        Sparse matrices are converted using :func:`toarray()`. Other array-like inputs are converted using
+        :func:`numpy.asarray`. Vector-like arrays with shape ``(n,)``, ``(n, 1)``, or ``(1, n)`` are returned as
+        one-dimensional arrays. Matrix-like arrays are returned unchanged.
 
         Parameters:
             x: Input data, such as a NumPy array, list, or SciPy sparse matrix.
@@ -207,21 +208,33 @@ class LPAlgorithm(BaseAlgorithm):
             weights: NDArray[np.float64],
             linprog_method: LinprogMethod
     ) -> tuple[NDArray[np.float64], float]:
-        """
-        Solve the LAV/WLAV linear programming problem using ``scipy.optimize.linprog``.
+        r"""
+        Solve the LAV/WLAV linear programming problem using :func:`scipy.optimize.linprog`.
 
-        The optimization problem is formulated as: min Σ_i w_i * u_i
-        subject to: -u <= r - H dE <= u
+        The optimization problem is formulated as:
+
+        .. math::
+            \min \sum_i w_i \, u_i
+
+        subject to:
+
+        .. math::
+            -u \le r - H \Delta E \le u
+
         where:
-            * ``dE`` are the state updates
-            * ``u`` are auxiliary nonnegative variables representing the absolute residuals
-            * ``r`` is the current residual vector
-            * ``H`` is the Jacobian matrix
 
-        The LP variable vector is defined as: y = [dE_1, ..., dE_n, u_1, ..., u_m]
+            - :math:`\Delta E` = ``dE`` are the state updates
+            - :math:`u_i` are auxiliary nonnegative variables representing the absolute residuals
+            - :math:`r` = ``r`` is the current residual vector
+            - :math:`H` = ``H`` is the Jacobian matrix
+
+        The LP variable vector is defined as :math:`y = [\Delta E_1, \ldots, \Delta E_n, u_1, \ldots, u_m]^\top`.
         The inequality constraints are rewritten into standard LP form:
-            H dE - u <= r
-           -H dE - u <= -r
+
+        .. math::
+            H\,\Delta E - u \le r
+        .. math::
+           -H\,\Delta E - u \le -r
 
         Sparse matrices are used throughout the formulation to improve performance and memory efficiency for large-scale
         power systems.
@@ -232,17 +245,14 @@ class LPAlgorithm(BaseAlgorithm):
             weights: Weight vector for WLAV. For standard LAV, this is typically ``np.ones(m)``.
             linprog_method: Method passed to ``scipy.optimize.linprog`` (e.g. ``"highs"``).
 
-        Returns:
-            tuple[NDArray[np.float64], float]:
-                Tuple containing:
-                * ``d_E``:
-                  State update vector with shape ``(n,)``.
-                * ``objective_value``:
-                  Final value of the LP objective function.
-
         Raises:
-            np.linalg.LinAlgError:
-                If the LP optimization fails or no feasible solution is found.
+            numpy.linalg.LinAlgError: If the LP optimization fails or no feasible solution is found.
+
+        Returns:
+            a tuple with
+
+            * **d_E:** State update vector with shape ``(n,)``
+            * **objective_value:** Final value of the LP objective function.
         """
         # m number of measurements -> z element R^{m}, n number of state variable
         m, n = H.shape
@@ -312,20 +322,34 @@ class LPAlgorithm(BaseAlgorithm):
             r: NDArray[np.float64],
             weights: NDArray[np.float64]
     ) -> tuple[NDArray[np.float64], float]:
-        """
-        Solve the LAV/WLAV linear programming problem using OR-Tools SCIP.
+        r"""
+        Solve the LAV/WLAV linear programming problem using `OR-Tools SCIP <https://github.com/google/or-tools>`_ .
 
-        The optimization problem is formulated as: min Σ_i w_i * u_i
-        subject to: -u <= r - H dE <= u
+        The optimization problem is formulated as:
+
+        .. math::
+            \min \sum_i w_i \, u_i
+
+        subject to:
+
+        .. math::
+            -u \le r - H \Delta E \le u
+
         where:
-            * ``dE`` are the state updates
-            * ``u`` are auxiliary nonnegative variables representing the absolute residuals
-            * ``r`` is the current residual vector
-            * ``H`` is the sparse Jacobian matrix
-        The LP variable vector is: y = [dE_1, ..., dE_n, u_1, ..., u_m]
-        The inequality constraints are implemented row-wise using sparse CSR iteration:
-            H_i dE - u_i <= r_i
-           -H_i dE - u_i <= -r_i
+
+            - :math:`\Delta E` = ``dE`` are the state updates
+            - :math:`u_i` are auxiliary nonnegative variables representing the absolute residuals
+            - :math:`r` = ``r`` is the current residual vector
+            - :math:`H` = ``H`` is the Jacobian matrix
+
+        The LP variable vector is defined as :math:`y = [\Delta E_1, \ldots, \Delta E_n, u_1, \ldots, u_m]^\top`.
+        The inequality constraints are rewritten into standard LP form:
+
+        .. math::
+            H\,\Delta E - u \le r
+        .. math::
+           -H\,\Delta E - u \le -r
+
         Only nonzero Jacobian entries are processed, which significantly improves performance for large-scale sparse
         systems.
 
@@ -334,16 +358,14 @@ class LPAlgorithm(BaseAlgorithm):
             r: Residual vector ``z - h(x)`` with shape ``(m,)``.
             weights: Weight vector for WLAV. For standard LAV, this is typically ``np.ones(m)``.
 
-        Returns:
-            tuple[NDArray[np.float64], float]:
-                Tuple containing:
-                * ``d_E``:
-                  State update vector with shape ``(n,)``.
-                * ``objective_value``:
-                  Final value of the LP objective function.
-
         Raises:
-            np.linalg.LinAlgError: If the solver is unavailable or if no feasible solution is found.
+            numpy.linalg.LinAlgError: If the LP optimization fails or no feasible solution is found.
+
+        Returns:
+            a tuple with
+
+            * **d_E:** State update vector with shape ``(n,)``
+            * **objective_value:** Final value of the LP objective function.
         """
         # m number of measurements -> z element R^{m}, n number of state variable
         m, n = H.shape

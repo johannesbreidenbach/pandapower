@@ -168,7 +168,7 @@ class WLSAlgorithm(BaseAlgorithm):
                 # jacobian matrix H
                 H = csr_matrix(sem.create_hx_jacobian(E))
 
-                # remove current magnitude measurements at the first iteration 
+                # remove current magnitude measurements at the first iteration
                 # because with flat start they have null derivative
                 if cur_it == 0 and eppci.any_i_meas:
                     idx = eppci.idx_non_imeas
@@ -191,7 +191,7 @@ class WLSAlgorithm(BaseAlgorithm):
                 d_E = spsolve(G_m, H.T * (r_inv * r))  # It does not explicitly compute G_m^{-1}.
                 # It solves the system of equations directly.
 
-                # Scaling of Delta_X to avoid divergence due o ill-conditioning and 
+                # Scaling of Delta_X to avoid divergence due o ill-conditioning and
                 # operating conditions far from starting state variables
                 current_error = float(np.max(np.abs(d_E)))
                 if current_error > 0.35:
@@ -351,7 +351,7 @@ class IRWLSAlgorithm(BaseAlgorithm):
 
 class AFWLSAlgorithm(BaseAlgorithm):
     def __init__(self, tolerance, maximum_iterations, logger=std_logger):
-        """
+        r"""
         Initialize the Allocation-Factor Weighted Least Squares (AF-WLS) algorithm.
 
         This algorithm extends the classical WLS state estimation by augmenting the state vector with additional
@@ -360,8 +360,8 @@ class AFWLSAlgorithm(BaseAlgorithm):
 
         Parameters:
             tolerance:
-                Convergence threshold for the state update ‖ΔE‖_∞. The iterative process stops once the maximum absolute
-                update is below this value.
+                Convergence threshold for the state update :math:`\lVert \Delta E \rVert_{\infty}`. The iterative
+                process stops once the maximum absolute update is below this value.
             maximum_iterations:
                 Maximum number of iterations allowed before the algorithm is considered not converged.
             logger:
@@ -379,26 +379,31 @@ class AFWLSAlgorithm(BaseAlgorithm):
         self.obj_func = None  # objective function J(x)
 
     def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs):
-        """
+        r"""
         Perform augmented weighted least squares state estimation.
 
         The AF-WLS algorithm estimates both the classical electrical state variables and additional allocation-factor or
         cluster variables. Therefore, the state vector is assumed to have the form
-            E = [theta, V, alpha_1, ..., alpha_k]^T,
-        where ``theta`` and ``V`` are the usual voltage angle and magnitude state variables, while ``alpha_i`` are
-        cluster/allocation-factor variables.
+        :math:`y = [\theta, V, \alpha_{1}, …, \alpha_{k}]^\top` , where :math:`\theta` and :math:`V` are the usual
+        voltage angle and magnitude state variables, while :math:`\alpha_{i}` are cluster/allocation-factor variables.
 
         In each iteration, the nonlinear measurement model is linearized around the current state estimate:
+
+        .. math::
             r = z - h(E)
-            r_new ≈ r - H ΔE
+        .. math::
+           r_{\text{new}} \approx r - H\,\Delta E
 
         The weighted least squares update is then computed by solving
-            (H^T R^{-1} H) ΔE = H^T R^{-1} r,
-        without explicitly inverting the gain matrix.
 
-        At the end of the estimation, the augmented state vector is split into:
-            * the electrical state vector, which is written back via ``eppci.update_E()``
-            * the cluster/allocation-factor vector, which is stored in ``eppci.clusters``
+        .. math::
+            (H^\mathsf{T} R^{-1} H)\,\Delta E = H^\mathsf{T} R^{-1} r
+
+        without explicitly inverting the gain matrix. At the end of the estimation, the augmented state vector is split
+        into:
+
+            - the electrical state vector, which is written back via :func:`eppci.update_E`
+            - the cluster/allocation-factor vector, which is stored in :func:`eppci.clusters`
 
         Parameters:
             eppci:
@@ -412,9 +417,8 @@ class AFWLSAlgorithm(BaseAlgorithm):
             **kwargs: Currently unused. Present for API compatibility and possible future extensions.
 
         Returns:
-            ExtendedPPCI | bool:
-                The updated data container with estimated electrical state variables and cluster/allocation factors if
-                the estimation succeeds. Returns ``False`` if a linear algebra error occurs.
+            The updated data container with estimated electrical state variables and cluster/allocation factors if the
+            estimation succeeds. Returns ``False`` if a linear algebra error occurs.
         """
         # Initialize eppci and check the basic observability criterion
         self.initialize(eppci)
@@ -447,7 +451,7 @@ class AFWLSAlgorithm(BaseAlgorithm):
 
                 # gain matrix G_m
                 G_m = H.T * (r_inv * H)
-                if debug_mode: 
+                if debug_mode:
                     norm_G = norm(G_m, np.inf)
                     norm_invG = norm(inv(G_m), np.inf)
                     cond = norm_G*norm_invG
