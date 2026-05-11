@@ -4,6 +4,7 @@
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
 import numpy as np
+import pandas as pd
 from numpy.typing import NDArray
 
 from typing import Literal, Union
@@ -49,6 +50,7 @@ class LPAlgorithm(BaseAlgorithm):
         self.H = None  # Jacobian matrix
         self.hx = None  # calculated measurements h(x)
         self.obj_func = None  # objective function J(x)
+        self.af: pd.DataFrame | None = None  # calculation results from allocation factor
 
     def estimate(
             self,
@@ -67,13 +69,17 @@ class LPAlgorithm(BaseAlgorithm):
         .. math::
             r = z - h(x), \quad r_{\text{new}} \approx r - H \,\Delta E,
 
-        where the objective is to minimize the (weighted) 1-norm of the residuals
+        :math:`z` is the measurement vector and :math:`h(x)` is the non-linear measurement function (What measurement
+        values would we expect if the network state x holds?). In the script the current state vector :math:`x = E` and
+        :math:`H` is the Jacobian-Matrix. The objective is to minimize the (weighted) 1-norm of the residuals
 
         .. math::
             \min \sum_i w_i \, \lvert r_i \rvert.
 
-        In each iteration, a linear program is solved via :func:`scipy.optimize.linprog` to obtain the state update
-        :math:`\Delta E`. The state vector ``E`` inside ``eppci`` is updated in-place.
+        Let :math:`w_i` be the weight and :math:`r_i` be the residual or measurement error of i-th element. In each
+        iteration, a linear program is solved via :func:`scipy.optimize.linprog` to obtain the state update
+        :math:`\Delta E`. The state vector :math:`E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}]^\top`
+        inside ``eppci`` is updated in-place.
 
         Parameters:
             eppci:
@@ -168,7 +174,18 @@ class LPAlgorithm(BaseAlgorithm):
         if self.successful:
             self.r = np.asarray(sem.create_rx(E)).reshape(-1)
             self.H = np.asarray(sem.create_hx_jacobian(E))
-            self.hx = sem.create_hx(eppci.E)
+            # self.hx = sem.create_hx(eppci.E)  # ToDo: bei AF does not work
+
+
+        # split voltage and allocation factor variables
+        # clusters are set in ppc_conversion.py/_add_rated_power_information_af_wls() only if algorithm == "af-wls"
+        if "clusters" in self.eppci:
+            num_clusters = len(self.eppci["clusters"])
+            E1 = E[:-num_clusters]
+            E2 = E[-num_clusters:]
+            self.af = pd.DataFrame([E2], columns=eppci["clusters"])
+            eppci.update_E(E1)
+            eppci.clusters = E2
 
         return eppci
 
@@ -228,13 +245,33 @@ class LPAlgorithm(BaseAlgorithm):
             - :math:`r` = ``r`` is the current residual vector
             - :math:`H` = ``H`` is the Jacobian matrix
 
-        The LP variable vector is defined as :math:`y = [\Delta E_1, \ldots, \Delta E_n, u_1, \ldots, u_m]^\top`.
-        The inequality constraints are rewritten into standard LP form:
+        The LP variable vector is defined as:
 
         .. math::
-            H\,\Delta E - u \le r
+            y = [\Delta E_1, \ldots, \Delta E_n, u_1, \ldots, u_m]^\top
+
+        The inequality constraints are assembled into the standard LP form:
+
         .. math::
-           -H\,\Delta E - u \le -r
+            A_{ub} \, y \le b_{ub}
+
+        with:
+
+        .. math::
+            A_{ub} = \begin{bmatrix} -H & -I \\ H & -I \end{bmatrix}
+
+        and:
+
+        .. math::
+            b_{ub} = \begin{bmatrix} -r \\ r \end{bmatrix}
+
+        which corresponds to:
+
+        .. math::
+            -H \Delta E - u \le -r
+
+        .. math::
+             H \Delta E - u \le r
 
         Sparse matrices are used throughout the formulation to improve performance and memory efficiency for large-scale
         power systems.
@@ -251,10 +288,10 @@ class LPAlgorithm(BaseAlgorithm):
         Returns:
             a tuple with
 
-            * **d_E:** State update vector with shape ``(n,)``
-            * **objective_value:** Final value of the LP objective function.
+            * :math:`\Delta E`: State update vector with shape ``(n,)``
+            * ``objective_value``: Final value of the LP objective function.
         """
-        # m number of measurements -> z element R^{m}, n number of state variable
+        # m number of measurements len(eppci.z) -> z element R^{m}, n number of state variable len(eppci.E)
         m, n = H.shape
 
         # We solve (Abur - Power system state estimation: theory and implementation, 2004):
@@ -323,57 +360,107 @@ class LPAlgorithm(BaseAlgorithm):
             weights: NDArray[np.float64]
     ) -> tuple[NDArray[np.float64], float]:
         r"""
-        Solve the LAV/WLAV linear programming problem using `OR-Tools SCIP <https://github.com/google/or-tools>`_ .
+        Solve the (weighted) Least Absolute Value (LAV/WLAV) state estimation subproblem using
+        `OR-Tools SCIP <https://github.com/google/or-tools>`_.
 
-        The optimization problem is formulated as:
+        The nonlinear measurement model is linearized around the current state:
 
         .. math::
-            \min \sum_i w_i \, u_i
+            r^{new} \approx r - H \Delta E
+
+        where:
+
+            - :math:`r` is the current residual vector
+            - :math:`H` is the Jacobian matrix
+            - :math:`\Delta E` is the state update vector
+
+        The optimization problem minimizes the weighted absolute residuals:
+
+        .. math::
+            \min \sum_i w_i |r_i - H_i \Delta E|
+
+        Since the absolute value operator is nonlinear, auxiliary variables :math:`u_i` are introduced such that:
+
+        .. math::
+            -u_i \le r_i - H_i \Delta E \le u_i
+
+        The LP variable vector is defined as:
+
+        .. math::
+            y = [\Delta E_1, \ldots, \Delta E_n, u_1, \ldots, u_m]^\top
+
+        The optimization problem can then be written in standard LP form:
+
+        .. math::
+            \min \sum_i w_i u_i
 
         subject to:
 
         .. math::
-            -u \le r - H \Delta E \le u
+            A_{ub} \, y \le b_{ub}
 
-        where:
-
-            - :math:`\Delta E` = ``dE`` are the state updates
-            - :math:`u_i` are auxiliary nonnegative variables representing the absolute residuals
-            - :math:`r` = ``r`` is the current residual vector
-            - :math:`H` = ``H`` is the Jacobian matrix
-
-        The LP variable vector is defined as :math:`y = [\Delta E_1, \ldots, \Delta E_n, u_1, \ldots, u_m]^\top`.
-        The inequality constraints are rewritten into standard LP form:
+        with:
 
         .. math::
-            H\,\Delta E - u \le r
-        .. math::
-           -H\,\Delta E - u \le -r
+            A_{ub} = \begin{bmatrix} H & -I \\ -H & -I \end{bmatrix}
 
-        Only nonzero Jacobian entries are processed, which significantly improves performance for large-scale sparse
-        systems.
+        and:
+
+        .. math::
+            b_{ub} = \begin{bmatrix} r \\ -r \end{bmatrix}
+
+        which corresponds to the pair of inequalities:
+
+        .. math::
+             H \Delta E - u \le r
+
+        .. math::
+            -H \Delta E - u \le -r
+
+        Notes:
+            * ``dE`` variables are free variables and may take positive or negative values
+            * ``u`` variables are nonnegative and represent the absolute residual magnitudes
+            * The Jacobian matrix is processed row-wise in sparse CSR format
+              for efficiency on large-scale sparse systems
+
 
         Parameters:
-            H: Sparse Jacobian matrix in CSR format with shape ``(m, n)``.
-            r: Residual vector ``z - h(x)`` with shape ``(m,)``.
-            weights: Weight vector for WLAV. For standard LAV, this is typically ``np.ones(m)``.
+            H:
+                Sparse Jacobian matrix with shape ``(m, n)``. ``m`` = number of measurements and ``n`` = number of
+                state variables
+
+            r:
+                Current residual vector: :math:`r = z - h(E)` with shape ``(m,)``.
+
+            weights:
+                Weight vector used for WLAV. Typical choices ``weights = np.ones(m)`` (Standard LAV) and
+                ``weights = 1 / sigma`` (Weighted LAV)
 
         Raises:
-            numpy.linalg.LinAlgError: If the LP optimization fails or no feasible solution is found.
+            numpy.linalg.LinAlgError:
+                If OR-Tools SCIP is unavailable or if the optimization fails.
 
         Returns:
-            a tuple with
+            tuple containing:
 
-            * **d_E:** State update vector with shape ``(n,)``
-            * **objective_value:** Final value of the LP objective function.
+            * **d_E**
+              State update vector with shape ``(n,)``.
+
+            * **objective_value**
+              Final LP objective value:
+
+              .. math::
+                  \sum_i w_i u_i
         """
         # m number of measurements -> z element R^{m}, n number of state variable
         m, n = H.shape
 
-        # Ignore very small coefficients to improve numerical stability
+        # Small threshold to ignore tiny numerical coefficients when building sparse linear expressions
         error_margin = 1e-10
 
-        # Create SCIP solver
+        # Create OR-Tools SCIP solver instance
+        #
+        # SCIP is generally robust for sparse LP problems arising in power system state estimation
         solver = pywraplp.Solver.CreateSolver("SCIP")
 
         if solver is None:
@@ -381,30 +468,50 @@ class LPAlgorithm(BaseAlgorithm):
 
         infinity = solver.infinity()
 
-        # State update variables dE:
-        # free variables (-inf <= dE <= inf)
+        # ------------------------------------------------------------------
+        # Create optimization variables
+        # ------------------------------------------------------------------
+
+        # State update variables:
+        #
+        # dE_j ∈ (-∞, +∞)
+        # These are free variables because voltage magnitudes and voltage angles may increase or decrease
         dE = [
-            solver.NumVar(-infinity, infinity, f"dE_{j}")
-            for j in range(n)
+            solver.NumVar(-infinity, infinity, f"dE_{j}") for j in range(n)
         ]
 
-        # Auxiliary variables u:
+        # Auxiliary residual magnitude variables:
         # u_i >= 0
+        # These variables represent:
+        # |r_i - H_i dE|
+        # and are minimized in the objective function
         u = [
             solver.NumVar(0.0, infinity, f"u_{i}")
             for i in range(m)
         ]
 
-        # Add inequality constraints row-wise using sparse CSR access
+        # ------------------------------------------------------------------
+        # Add inequality constraints
+        # ------------------------------------------------------------------
+
+        # Iterate row-wise through the sparse Jacobian matrix. Each row corresponds to one measurement equation
         for i in range(m):
-            # CSR row access
+            # CSR row access:
+            #
+            # indptr stores row boundaries
+            # Row i contains entries:
+            # indices[start:end]
+            # data[start:end]
             start, end = H.indptr[i], H.indptr[i + 1]
 
             cols = H.indices[start:end]
             vals = H.data[start:end]
 
             # Build sparse linear expression:
-            # Σ_j H_ij * dE_j
+            #
+            # H_i dE = Σ_j H_ij * dE_j
+            #
+            # Only nonzero Jacobian entries are processed
             h_expr = solver.Sum(
                 vals[k] * dE[cols[k]]
                 for k in range(len(vals))
@@ -419,18 +526,28 @@ class LPAlgorithm(BaseAlgorithm):
             # -H_i dE - u_i <= -r_i
             solver.Add(-h_expr - u[i] <= float(-r[i]))
 
-        # Objective function:
+        # ------------------------------------------------------------------
+        # Objective function
+        # ------------------------------------------------------------------
+
+        # Minimize weighted sum of auxiliary variables:
         # min Σ_i weights_i * u_i
-        objective = solver.Sum(
-            float(weights[i]) * u[i]
-            for i in range(m)
-        )
+
+        # Since u_i >= |r_i - H_i dE|,
+        # this minimizes the weighted L1 norm
+        objective = solver.Sum(float(weights[i]) * u[i] for i in range(m))
 
         solver.Minimize(objective)
 
-        # Solve LP
+        # ------------------------------------------------------------------
+        # Solve optimization problem
+        # ------------------------------------------------------------------
         status = solver.Solve()
 
+        # Accept:
+        #
+        # OPTIMAL  -> globally optimal LP solution found
+        # FEASIBLE -> feasible solution found
         if status not in (
                 pywraplp.Solver.OPTIMAL,
                 pywraplp.Solver.FEASIBLE
@@ -439,7 +556,10 @@ class LPAlgorithm(BaseAlgorithm):
                 "OR-Tools LAV optimization failed."
             )
 
-        # Extract state update vector
+        # ------------------------------------------------------------------
+        # Extract optimized state update vector
+        # ------------------------------------------------------------------
         d_E: NDArray[np.float64] = np.asarray([var.solution_value() for var in dE], dtype=np.float64)
+        # Final objective value: Σ_i weights_i * u_i
         objective_value = solver.Objective().Value()
         return d_E, float(objective_value)

@@ -50,7 +50,7 @@ class BaseAlgebra:
 
     def create_hx(self, E):
         f_bus, t_bus = self.fb, self.tb
-        if self.eppci.algorithm == "af-wls":
+        if self.eppci.algorithm in ["af-wls", "af-lp"]:
             num_clusters = len(self.eppci["clusters"])
             E1 = E[:-num_clusters]
             E2 = E[-num_clusters:]
@@ -80,7 +80,7 @@ class BaseAlgebra:
         
         hx = np.r_[Pbuse, Qbuse, Pfe, Qfe, Pte, Qte, Vm, Va, Imfe, Imte]
 
-        if self.eppci.algorithm == "af-wls":
+        if self.eppci.algorithm in ["af-wls", "af-lp"]:
             Pb2 = np.real(Sbuse) - np.sum(np.multiply(E2,self.eppci["rated_power_clusters"][:,:num_clusters]),axis=1)
             Qb2 = np.imag(Sbuse) - np.sum(np.multiply(E2,self.eppci["rated_power_clusters"][:,num_clusters:2*num_clusters]),axis=1)
             Pbuse2 = Pb2[meas_mask["pbalance"]]
@@ -92,7 +92,7 @@ class BaseAlgebra:
 
     def create_hx_jacobian(self, E):
         # Using sparse matrix in creation sub-jacobian matrix
-        if self.eppci.algorithm == "af-wls":
+        if self.eppci.algorithm in ["af-wls", "af-lp"]:
             num_clusters = len(self.eppci["clusters"])
             E1 = E[:-num_clusters]
         else:
@@ -133,7 +133,7 @@ class BaseAlgebra:
         # dIfa = self._dIabr_dV(V, "from")
         # dIta = self._dIabr_dV(V, "to")
 
-        if self.eppci.algorithm == "af-wls":
+        if self.eppci.algorithm in ["af-wls", "af-lp"]:
             p_bal_jac_E1, q_bal_jac_E1 = self._dSbus_dv(V, meas_mask["pbalance"], meas_mask["qbalance"])
             af_vmeas_E1 = sparse((num_clusters,jac.shape[1])) 
 

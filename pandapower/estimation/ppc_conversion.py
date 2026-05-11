@@ -491,7 +491,7 @@ def _add_measurements_to_ppci(net, ppci, zero_injection, algorithm):
         ppci["branch"][:, branch_cols: branch_cols + branch_cols_se] = branch_append
 
     # Add rated power information needed for AF-WLS estimator
-    if algorithm == 'af-wls':
+    if algorithm in ['af-wls', 'af-lp']:
         _add_rated_power_information_af_wls(net, ppci)
 
     return ppci
@@ -599,7 +599,7 @@ def _build_measurement_vectors(ppci, update_meas_only=False):
                                 np.ones(sum(i_line_f_not_nan)),
                                 np.ones(sum(i_line_t_not_nan))
                                 )).astype(bool)
-    if ppci.algorithm == "af-wls":
+    if ppci.algorithm in ['af-wls', 'af-lp']:
         balance_eq_meas = np.zeros(ppci["rated_power_clusters"].shape[0]).astype(np.float64)
         af_vmeas = 0.4 * np.ones(len(ppci["clusters"]))
         z = np.concatenate(
@@ -645,7 +645,7 @@ def _build_measurement_vectors(ppci, update_meas_only=False):
                      "ifrom" : np.flatnonzero(i_line_f_not_nan),
                      "ito" : np.flatnonzero(i_line_t_not_nan)}
         
-        if ppci.algorithm == "af-wls":
+        if ppci.algorithm in ['af-wls', 'af-lp']:
             num_clusters = len(ppci["clusters"])
             P_balance_dev_std = np.sqrt(
                 np.sum(np.square(ppci["rated_power_clusters"][:, 2 * num_clusters:3 * num_clusters]), axis=1))
@@ -715,7 +715,7 @@ class ExtendedPPCI(UserDict):
         self.v = self.v_init.copy()
         self.delta = self.delta_init.copy()
         self.E = self.E_init.copy()
-        if algorithm == "af-wls":
+        if algorithm in ['af-wls', 'af-lp']:  # set initial allocation factor ToDo: why 0.5
             self.E = np.concatenate((self.E, np.full(ppci["clusters"].shape, 0.5)))
 
     def _initialize_meas(self):

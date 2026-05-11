@@ -4,7 +4,7 @@
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
 import numpy as np
-
+import pandas as pd
 
 from scipy.sparse import csr_matrix, vstack, hstack
 from scipy.sparse.linalg import spsolve, norm, inv
@@ -129,20 +129,49 @@ class WLSAlgorithm(BaseAlgorithm):
         self.H = None  # Jacobian matrix
         self.hx = None  # calculated measurements h(x)
         self.obj_func = None  # objective function J(x)
+        self.af: pd.DataFrame | None = None  # calculation results from allocation factor
 
     def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs) -> ExtendedPPCI | bool:
-        """
-        Perform state estimation using the provided data container and wls.
+        r"""
+        Perform augmented weighted least squares state estimation.
+
+        The AF-WLS algorithm estimates both the classical electrical state variables and additional allocation-factor or
+        cluster variables. Therefore, the state vector is assumed to have the form
+        :math:`y = [\theta, V, \alpha_{1}, …, \alpha_{k}]^\top` , where :math:`\theta` and :math:`V` are the usual
+        voltage angle and magnitude state variables, while :math:`\alpha_{i}` are cluster/allocation-factor variables.
+
+        In each iteration, the nonlinear measurement model is linearized around the current state estimate:
+
+        .. math::
+            r = z - h(E)
+        .. math::
+           r_{\text{new}} \approx r - H\,\Delta E
+
+        The weighted least squares update is then computed by solving
+
+        .. math::
+            (H^\mathsf{T} R^{-1} H)\,\Delta E = H^\mathsf{T} R^{-1} r
+
+        without explicitly inverting the gain matrix. At the end of the estimation, the augmented state vector is split
+        into:
+
+            - the electrical state vector, which is written back via :func:`eppci.update_E`
+            - the cluster/allocation-factor vector, which is stored in :func:`eppci.clusters`
 
         Parameters:
-            eppci: central data container with net, measurements, z-vector, etc.
-            debug_mode: Debug mode.
+            eppci:
+                Central data container containing the network model, measurements, measurement covariance, current
+                augmented state vector ``E``, and cluster/allocation-factor information.
+            debug_mode:
+                If ``True``, additional diagnostic information is logged, including the current state update norm,
+                objective function value, and possible ill-conditioning of the gain matrix.
 
         Keyword Arguments:
-            unused
+            **kwargs: Currently unused. Present for API compatibility and possible future extensions.
 
         Returns:
-            Updated data container with estimated state variables.
+            The updated data container with estimated electrical state variables and cluster/allocation factors if the
+            estimation succeeds. Returns ``False`` if a linear algebra error occurs.
         """
         # initialize eppci and check the observability
         self.initialize(eppci)
@@ -159,6 +188,7 @@ class WLSAlgorithm(BaseAlgorithm):
         r_inv = csr_matrix((r_weight, (len_r, len_r)))  # diagonal matrix
         E = eppci.E  # current state vector E=x=[theta_2, ..., V_1, ...]^{T}
         obj_func = None  # J(x) objective function
+
         while current_error > self.tolerance and cur_it < self.max_iterations:
             # self.logger.debug("Starting iteration {:d}".format(1 + cur_it))
             try:
@@ -198,7 +228,7 @@ class WLSAlgorithm(BaseAlgorithm):
                     d_E = d_E*0.35/current_error
 
                 # Update E with d_E
-                E += d_E.ravel()
+                E += d_E.ravel()  # ravel() convert multidimensional array to 1D-array
                 eppci.update_E(E)
 
                 if debug_mode:
@@ -231,6 +261,16 @@ class WLSAlgorithm(BaseAlgorithm):
             self.H = H.toarray()
             # create h(x) for the current iteration
             self.hx = sem.create_hx(eppci.E)
+
+            # split voltage and allocation factor variables
+            # clusters are set in ppc_conversion.py/_add_rated_power_information_af_wls() only if algorithm == "af-wls"
+            if "clusters" in self.eppci:
+                num_clusters = len(self.eppci["clusters"])
+                E1 = E[:-num_clusters]
+                E2 = E[-num_clusters:]
+                self.af = pd.DataFrame([E2], columns=eppci["clusters"])
+                eppci.update_E(E1)
+                eppci.clusters = E2
         return eppci
 
 
@@ -349,153 +389,155 @@ class IRWLSAlgorithm(BaseAlgorithm):
         return eppci
 
 
-class AFWLSAlgorithm(BaseAlgorithm):
-    def __init__(self, tolerance, maximum_iterations, logger=std_logger):
-        r"""
-        Initialize the Allocation-Factor Weighted Least Squares (AF-WLS) algorithm.
-
-        This algorithm extends the classical WLS state estimation by augmenting the state vector with additional
-        cluster/allocation-factor variables. These additional variables are estimated together with the electrical state
-        variables.
-
-        Parameters:
-            tolerance:
-                Convergence threshold for the state update :math:`\lVert \Delta E \rVert_{\infty}`. The iterative
-                process stops once the maximum absolute update is below this value.
-            maximum_iterations:
-                Maximum number of iterations allowed before the algorithm is considered not converged.
-            logger:
-                Logger instance used for diagnostic and error messages.
-        """
-        # Initialize base algorithm
-        super(AFWLSAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
-
-        # Parameters for Bad data detection
-        self.R_inv = None  # weighting matrix R^{-1}
-        self.Gm = None  # gain matrix G
-        self.r = None  # residual z-h(x)
-        self.H = None  # Jacobian matrix
-        self.hx = None  # calculated measurements h(x)
-        self.obj_func = None  # objective function J(x)
-
-    def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs):
-        r"""
-        Perform augmented weighted least squares state estimation.
-
-        The AF-WLS algorithm estimates both the classical electrical state variables and additional allocation-factor or
-        cluster variables. Therefore, the state vector is assumed to have the form
-        :math:`y = [\theta, V, \alpha_{1}, …, \alpha_{k}]^\top` , where :math:`\theta` and :math:`V` are the usual
-        voltage angle and magnitude state variables, while :math:`\alpha_{i}` are cluster/allocation-factor variables.
-
-        In each iteration, the nonlinear measurement model is linearized around the current state estimate:
-
-        .. math::
-            r = z - h(E)
-        .. math::
-           r_{\text{new}} \approx r - H\,\Delta E
-
-        The weighted least squares update is then computed by solving
-
-        .. math::
-            (H^\mathsf{T} R^{-1} H)\,\Delta E = H^\mathsf{T} R^{-1} r
-
-        without explicitly inverting the gain matrix. At the end of the estimation, the augmented state vector is split
-        into:
-
-            - the electrical state vector, which is written back via :func:`eppci.update_E`
-            - the cluster/allocation-factor vector, which is stored in :func:`eppci.clusters`
-
-        Parameters:
-            eppci:
-                Central data container containing the network model, measurements, measurement covariance, current
-                augmented state vector ``E``, and cluster/allocation-factor information.
-            debug_mode:
-                If ``True``, additional diagnostic information is logged, including the current state update norm,
-                objective function value, and possible ill-conditioning of the gain matrix.
-
-        Keyword Arguments:
-            **kwargs: Currently unused. Present for API compatibility and possible future extensions.
-
-        Returns:
-            The updated data container with estimated electrical state variables and cluster/allocation factors if the
-            estimation succeeds. Returns ``False`` if a linear algebra error occurs.
-        """
-        # Initialize eppci and check the basic observability criterion
-        self.initialize(eppci)
-        # Matrix calculation object for residuals, calculated measurements and Jacobian
-        sem = BaseAlgebra(eppci)
-
-        current_error, cur_it = 100., 0
-        # invert covariance matrix
-        # Very small standard deviations are capped to prevent the weighting from becoming infinitely large.
-        eppci.r_cov[eppci.r_cov<(10**(-5))] = 10**(-5)
-        r_weight = 1 / eppci.r_cov ** 2
-        len_r = np.arange(len(r_weight))
-        r_inv = csr_matrix((r_weight, (len_r, len_r)))
-        E = eppci.E
-        num_clusters = len(self.eppci["clusters"])
-        while current_error > self.tolerance and cur_it < self.max_iterations:
-            # self.logger.debug("Starting iteration {:d}".format(1 + cur_it))
-            try:
-                # residual r
-                r = csr_matrix(sem.create_rx(E)).T
-
-                # jacobian matrix H
-                H = csr_matrix(sem.create_hx_jacobian(E))
-
-                if cur_it == 0 and eppci.any_i_meas:
-                    idx = eppci.idx_non_imeas
-                    r_inv = r_inv[idx,:][:,idx]
-                    r = r[idx,:]
-                    H = H[idx,:]
-
-                # gain matrix G_m
-                G_m = H.T * (r_inv * H)
-                if debug_mode:
-                    norm_G = norm(G_m, np.inf)
-                    norm_invG = norm(inv(G_m), np.inf)
-                    cond = norm_G*norm_invG
-                    if cond > 10**18:
-                        self.logger.warning("WARNING: Gain matrix is ill-conditioned: {:.2E}".format(cond))
-
-                # state vector difference d_E
-                # d_E = G_m^-1 * (H' * R^-1 * r)
-                d_E = spsolve(G_m, H.T * (r_inv * r))  # It solves the system of equations directly.
-
-                current_error = float(np.max(np.abs(d_E)))
-                # if current_error > 0.35:
-                #     d_E = d_E * 0.35 / current_error
-
-                # Update E with d_E
-                E += d_E.ravel()
-
-                # log data
-                if debug_mode:
-                    obj_func = (r.T*r_inv*r)[0,0]  # J(x) = r^{T}R^{-1}r
-                    self.logger.debug("Current delta_x: {:.7f}".format(current_error))
-                    self.logger.debug("Current objective function value: {:.1f}".format(obj_func))
-
-                # Restore full weighting matrix
-                if cur_it == 0 and eppci.any_i_meas:
-                    r_inv = csr_matrix(np.diagflat(1 / eppci.r_cov ** 2))
-
-                # prepare next iteration
-                cur_it += 1
-
-            except np.linalg.LinAlgError:
-                self.logger.error("A problem appeared while using the linear algebra methods."
-                                  "Check and change the measurement set.")
-                return False
-
-        # check if the estimation is successfull
-        self.check_result(current_error, cur_it)
-        self.iterations = cur_it
-        if debug_mode:
-            self.obj_func = obj_func
-        if self.successful:
-            # split voltage and allocation factor variables
-            E1 = E[:-num_clusters]
-            E2 = E[-num_clusters:]
-            eppci.update_E(E1)
-            eppci.clusters = E2
-        return eppci
+# class AFWLSAlgorithm(BaseAlgorithm):
+#     def __init__(self, tolerance, maximum_iterations, logger=std_logger):
+#         r"""
+#         Initialize the Allocation-Factor Weighted Least Squares (AF-WLS) algorithm.
+#
+#         This algorithm extends the classical WLS state estimation by augmenting the state vector with additional
+#         cluster/allocation-factor variables. These additional variables are estimated together with the electrical state
+#         variables.
+#
+#         Parameters:
+#             tolerance:
+#                 Convergence threshold for the state update :math:`\lVert \Delta E \rVert_{\infty}`. The iterative
+#                 process stops once the maximum absolute update is below this value.
+#             maximum_iterations:
+#                 Maximum number of iterations allowed before the algorithm is considered not converged.
+#             logger:
+#                 Logger instance used for diagnostic and error messages.
+#         """
+#         # Initialize base algorithm
+#         super(AFWLSAlgorithm, self).__init__(tolerance, maximum_iterations, logger)
+#
+#         # Parameters for Bad data detection
+#         self.R_inv = None  # weighting matrix R^{-1}
+#         self.Gm = None  # gain matrix G
+#         self.r = None  # residual z-h(x)
+#         self.H = None  # Jacobian matrix
+#         self.hx = None  # calculated measurements h(x)
+#         self.obj_func = None  # objective function J(x)
+#
+#     def estimate(self, eppci: ExtendedPPCI, debug_mode=False, **kwargs):
+#         r"""
+#         Perform augmented weighted least squares state estimation.
+#
+#         The AF-WLS algorithm estimates both the classical electrical state variables and additional allocation-factor or
+#         cluster variables. Therefore, the state vector is assumed to have the form
+#         :math:`y = [\theta, V, \alpha_{1}, …, \alpha_{k}]^\top` , where :math:`\theta` and :math:`V` are the usual
+#         voltage angle and magnitude state variables, while :math:`\alpha_{i}` are cluster/allocation-factor variables.
+#
+#         In each iteration, the nonlinear measurement model is linearized around the current state estimate:
+#
+#         .. math::
+#             r = z - h(E)
+#         .. math::
+#            r_{\text{new}} \approx r - H\,\Delta E
+#
+#         The weighted least squares update is then computed by solving
+#
+#         .. math::
+#             (H^\mathsf{T} R^{-1} H)\,\Delta E = H^\mathsf{T} R^{-1} r
+#
+#         without explicitly inverting the gain matrix. At the end of the estimation, the augmented state vector is split
+#         into:
+#
+#             - the electrical state vector, which is written back via :func:`eppci.update_E`
+#             - the cluster/allocation-factor vector, which is stored in :func:`eppci.clusters`
+#
+#         Parameters:
+#             eppci:
+#                 Central data container containing the network model, measurements, measurement covariance, current
+#                 augmented state vector ``E``, and cluster/allocation-factor information.
+#             debug_mode:
+#                 If ``True``, additional diagnostic information is logged, including the current state update norm,
+#                 objective function value, and possible ill-conditioning of the gain matrix.
+#
+#         Keyword Arguments:
+#             **kwargs: Currently unused. Present for API compatibility and possible future extensions.
+#
+#         Returns:
+#             The updated data container with estimated electrical state variables and cluster/allocation factors if the
+#             estimation succeeds. Returns ``False`` if a linear algebra error occurs.
+#         """
+#         # Initialize eppci and check the basic observability criterion
+#         self.initialize(eppci)
+#         # Matrix calculation object for residuals, calculated measurements and Jacobian
+#         sem = BaseAlgebra(eppci)
+#
+#         current_error, cur_it = 100., 0
+#         # invert covariance matrix
+#         # Very small standard deviations are capped to prevent the weighting from becoming infinitely large.
+#         eppci.r_cov[eppci.r_cov<(10**(-5))] = 10**(-5)
+#         r_weight = 1 / eppci.r_cov ** 2
+#         len_r = np.arange(len(r_weight))
+#         r_inv = csr_matrix((r_weight, (len_r, len_r)))
+#         E = eppci.E
+#         num_clusters = len(self.eppci["clusters"])
+#         while current_error > self.tolerance and cur_it < self.max_iterations:
+#             # self.logger.debug("Starting iteration {:d}".format(1 + cur_it))
+#             try:
+#                 # residual r
+#                 r = csr_matrix(sem.create_rx(E)).T
+#
+#                 # jacobian matrix H
+#                 H = csr_matrix(sem.create_hx_jacobian(E))
+#
+#                 # remove current magnitude measurements at the first iteration
+#                 # because with flat start they have null derivative
+#                 if cur_it == 0 and eppci.any_i_meas:
+#                     idx = eppci.idx_non_imeas
+#                     r_inv = r_inv[idx,:][:,idx]
+#                     r = r[idx,:]
+#                     H = H[idx,:]
+#
+#                 # gain matrix G_m
+#                 G_m = H.T * (r_inv * H)
+#                 if debug_mode:
+#                     norm_G = norm(G_m, np.inf)
+#                     norm_invG = norm(inv(G_m), np.inf)
+#                     cond = norm_G*norm_invG
+#                     if cond > 10**18:
+#                         self.logger.warning("WARNING: Gain matrix is ill-conditioned: {:.2E}".format(cond))
+#
+#                 # state vector difference d_E
+#                 # d_E = G_m^-1 * (H' * R^-1 * r)
+#                 d_E = spsolve(G_m, H.T * (r_inv * r))  # It solves the system of equations directly.
+#
+#                 current_error = float(np.max(np.abs(d_E)))
+#                 # if current_error > 0.35:
+#                 #     d_E = d_E * 0.35 / current_error
+#
+#                 # Update E with d_E
+#                 E += d_E.ravel()
+#
+#                 # log data
+#                 if debug_mode:
+#                     obj_func = (r.T*r_inv*r)[0,0]  # J(x) = r^{T}R^{-1}r
+#                     self.logger.debug("Current delta_x: {:.7f}".format(current_error))
+#                     self.logger.debug("Current objective function value: {:.1f}".format(obj_func))
+#
+#                 # Restore full weighting matrix
+#                 if cur_it == 0 and eppci.any_i_meas:
+#                     r_inv = csr_matrix(np.diagflat(1 / eppci.r_cov ** 2))
+#
+#                 # prepare next iteration
+#                 cur_it += 1
+#
+#             except np.linalg.LinAlgError:
+#                 self.logger.error("A problem appeared while using the linear algebra methods."
+#                                   "Check and change the measurement set.")
+#                 return False
+#
+#         # check if the estimation is successfull
+#         self.check_result(current_error, cur_it)
+#         self.iterations = cur_it
+#         if debug_mode:
+#             self.obj_func = obj_func
+#         if self.successful:
+#             # split voltage and allocation factor variables
+#             E1 = E[:-num_clusters]
+#             E2 = E[-num_clusters:]
+#             eppci.update_E(E1)
+#             eppci.clusters = E2
+#         return eppci

@@ -4,13 +4,16 @@
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
 from datetime import datetime
+from typing import overload, Literal
+
 import numpy as np
+from jupyterlab.utils import deprecated
 from scipy.stats import chi2
 
+from pandapower import pandapowerNet
 from pandapower.estimation.algorithm.base import (WLSAlgorithm,
                                                   WLSZeroInjectionConstraintsAlgorithm,
-                                                  IRWLSAlgorithm,
-                                                  AFWLSAlgorithm)
+                                                  IRWLSAlgorithm)
 from pandapower.estimation.algorithm.lp import LPAlgorithm
 from pandapower.estimation.algorithm.optimization import OptAlgorithm
 from pandapower.estimation.ppc_conversion import pp2eppci, _initialize_voltage
@@ -20,24 +23,46 @@ from pandapower.estimation.util import set_bb_switch_impedance, reset_bb_switch_
 import logging
 std_logger = logging.getLogger(__name__)
 
+Algorithms = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
 ALGORITHM_MAPPING = {'wls': WLSAlgorithm,
                      'wls_with_zero_constraint': WLSZeroInjectionConstraintsAlgorithm,
                      'opt': OptAlgorithm,
                      'irwls': IRWLSAlgorithm,
                      'lp': LPAlgorithm,
-                     'af-wls': AFWLSAlgorithm}
+                     'af-wls': WLSAlgorithm,
+                     'af-lp': LPAlgorithm}
+Algorithms = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
 ALLOWED_OPT_VAR = {"a", "opt_method", "estimator"}
 
 
 def estimate(
-        net, algorithm='wls', init='flat', tolerance=1e-6, maximum_iterations=50, zero_injection='aux_bus',
-        fuse_buses_with_bb_switch='all', debug_mode=False, **opt_vars
+        net: pandapowerNet,
+        algorithm: Algorithms ='wls',
+        init: str = 'flat',
+        tolerance: float = 1e-6,
+        maximum_iterations: int = 50,
+        zero_injection='aux_bus',
+        fuse_buses_with_bb_switch='all',
+        debug_mode: bool = False,
+        **opt_vars
 ):
     """
     Wrapper function for WLS state estimation.
 
     Parameters:
         net (pandapowerNet): The net within this line should be created
+        algorithm: Algorithm used for state estimation:
+
+            - "wls": classical weighted least squares (default)
+            - "wls_with_zero_constraint": WLS with zero-injection constraints
+            - "opt": optimization-based algorithm
+            - "irwls": iteratively reweighted WLS (robust estimation)
+            - "lp": linear programming–based approach
+            - "af-wls": WLS using allocation factors
+            - "af-lp": LP-based approach using allocation factors. This will add :math:`\\alpha`  in \
+                ppc_conversion.py :func:`_add_rated_power_information_af_wls` only if algorithm in ["af-wls", "af-lp"] \
+                however class LPAlgorithm will be used.
+
         init (string): Initial voltage for the estimation. 'flat' sets 1.0 p.u. / 0° for all buses, 'results' uses the
             values from *res_bus* if available and 'slack' considers the slack bus voltage (and optionally, angle) as
             the initial values. Default is 'flat'
@@ -167,6 +192,17 @@ class StateEstimation:
         self.delta = None
         self.bad_data_present = None
 
+    @overload
+    def estimate(self, v_start='flat', delta_start='flat', zero_injection=None,
+                 fuse_buses_with_bb_switch='all', debug_mode=False, **opt_vars):
+        ...
+
+    @overload
+    @deprecated("algorithm should be set via init. Use of algorithm key is deprecated.")
+    def estimate(self, v_start='flat', delta_start='flat', zero_injection=None,
+                 fuse_buses_with_bb_switch='all', algorithm='wls', debug_mode=False, **opt_vars):
+        ...
+
     def estimate(self, v_start='flat', delta_start='flat', zero_injection=None, 
                  fuse_buses_with_bb_switch='all', algorithm='wls', debug_mode=False, **opt_vars):
         """
@@ -243,7 +279,7 @@ class StateEstimation:
 
         self.net, self.ppc, self.eppci = pp2eppci(self.net, v_start=v_start, delta_start=delta_start,
                                                   calculate_voltage_angles=True,
-                                                  zero_injection=zero_injection, algorithm=algorithm, 
+                                                  zero_injection=zero_injection, algorithm=self.algorithm,
                                                   ppc=self.ppc, eppci=self.eppci)
 
         # Estimate voltage magnitude and angle with the given estimator
@@ -251,7 +287,7 @@ class StateEstimation:
 
         if self.solver.successful:
             self.net = eppci2pp(self.net, self.ppc, self.eppci)
-            if self.algorithm == "af-wls":
+            if self.algorithm in ["af-wls", "af-lp"]:
                 self.net["res_cluster_est"] = self.eppci.clusters
         else:
             self.logger.warning("Estimation failed! Pandapower network failed to update!")
@@ -264,7 +300,7 @@ class StateEstimation:
         if not self.recycle:
             self.ppc, self.eppci = None, None
         
-        if algorithm == "wls" or algorithm == "af-wls":
+        if self.algorithm in ["wls", "af-wls", "lp", "af-lp"]:
             now = datetime.now()
             se_results = {
                 "success": self.solver.successful,

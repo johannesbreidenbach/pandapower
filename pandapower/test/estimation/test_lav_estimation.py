@@ -337,7 +337,7 @@ def _create_network_with_measurements() -> pandapowerNet:
             net_base,
             meas_type="v",
             element_type="bus",
-            value=row.vm_pu * _r(.0),  # .01
+            value=row.vm_pu * _r(.01),  # .01
             std_dev=0.01,
             element=bus
         )
@@ -345,7 +345,7 @@ def _create_network_with_measurements() -> pandapowerNet:
             net=net_base,
             meas_type="p",
             element_type="bus",
-            value=row.p_mw * _r(.0),  # default
+            value=row.p_mw * _r(.03),  # default
             std_dev=max(0.001, abs(0.03 * row.p_mw)),
             element=bus
         )
@@ -353,7 +353,7 @@ def _create_network_with_measurements() -> pandapowerNet:
             net=net_base,
             meas_type="q",
             element_type="bus",
-            value=row.q_mvar * _r(.0),  # default
+            value=row.q_mvar * _r(.03),  # default
             std_dev=max(0.001, abs(0.03 * row.q_mvar)),
             element=bus
         )
@@ -386,9 +386,10 @@ def test_general_function(init='flat'):
 
     # 3. create copies for each estimation algorithm
     net_wls = copy.deepcopy(net_base)
-    # net_afwls = copy.deepcopy(net_base)
+    net_afwls = copy.deepcopy(net_base)
     net_lav = copy.deepcopy(net_base)
     net_wlav = copy.deepcopy(net_base)
+    net_afwlav = copy.deepcopy(net_base)
 
 
     # 4. run estimations with soft-fail (collect errors, do not raise immediately)
@@ -403,13 +404,13 @@ def test_general_function(init='flat'):
         delta_wls = net_wls.res_bus_est.va_degree.values
 
     # AF-WLS
-    # if not estimate(net_afwls, algorithm='af-wls', init="flat", wlav=False):
-    #     failures.append("AF-WLS estimation failed")
-    #     v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
-    #     delta_afwls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
-    # else:
-    #     v_afwls = net_wls.res_bus_est.vm_pu.values
-    #     delta_afwls = net_wls.res_bus_est.va_degree.values
+    if not estimate(net_afwls, algorithm='af-wls', init="flat", wlav=False):
+        failures.append("AF-WLS estimation failed")
+        v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
+        delta_afwls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
+    else:
+        v_afwls = net_wls.res_bus_est.vm_pu.values
+        delta_afwls = net_wls.res_bus_est.va_degree.values
 
     # LAV
     if not estimate(net_lav, algorithm='lp', wlav=False, with_ortools=False, init="flat", debug_mode=False):
@@ -429,6 +430,14 @@ def test_general_function(init='flat'):
         v_wlav = net_wlav.res_bus_est.vm_pu.values
         delta_wlav = net_wlav.res_bus_est.va_degree.values
 
+    # AF-WLAF
+    if not estimate(net_afwlav, algorithm='af-lp', wlav=True, with_ortools=False, init="flat", debug_mode=False):
+        failures.append("AF-WLAV estimation failed")
+        v_afwlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
+        delta_afwlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
+    else:
+        v_afwlav = net_wlav.res_bus_est.vm_pu.values
+        delta_afwlav = net_wlav.res_bus_est.va_degree.values
 
     # 5. power flow results (runpp) aus net_base
     v_pf = net_base.res_bus.vm_pu.values
@@ -439,11 +448,17 @@ def test_general_function(init='flat'):
     dV_wls = v_wls - v_pf
     dAngle_wls = delta_wls - delta_pf
 
+    dV_afwls = v_afwls - v_pf
+    dAngle_afwls = delta_afwls - delta_pf
+
     dV_lav = v_lav - v_pf
     dAngle_lav = delta_lav - delta_pf
 
     dV_wlav = v_wlav - v_pf
     dAngle_wlav = delta_wlav - delta_pf
+
+    dV_afwlav = v_afwlav - v_pf
+    dAngle_afwlav = delta_afwlav - delta_pf
 
 
     # 7. pack results into DataFrame
@@ -478,10 +493,29 @@ def test_general_function(init='flat'):
         index=net_base.res_bus.index,  # Bus-Index als Index
     )
 
+    res_max_diff_df = pd.DataFrame(
+        data={
+            'WLS V': [np.max(np.abs(dV_wls))],
+            'WLS A': [np.max(np.abs(dAngle_wls))],
+            'AF WLS V': [np.max(np.abs(dV_afwls))],
+            'AF WLS A': [np.max(np.abs(dAngle_afwls))],
+            'VLA V': [np.max(np.abs(dV_lav))],
+            'VLA A': [np.max(np.abs(dAngle_lav))],
+            'WLAV V': [np.max(np.abs(dV_wlav))],
+            'WLAV A': [np.max(np.abs(dAngle_wlav))],
+            'AF WLAV V': [np.max(np.abs(dV_afwlav))],
+            'AF WLAV A': [np.max(np.abs(dAngle_afwlav))]
+        }
+    )
+
     # 8. Checks: apply only to successful estimates
     if "WLS estimation failed" not in failures:
         assert np.nanmax(abs(dV_wls)) < 0.0043
         assert np.nanmax(abs(dAngle_wls)) < 0.2
+
+    if "AF-WLS estimation failed" not in failures:
+        assert np.nanmax(abs(dV_afwls)) < 0.0043
+        assert np.nanmax(abs(dAngle_afwls)) < 0.2
 
     if "LAV estimation failed" not in failures:
         assert np.nanmax(abs(dV_lav)) < 0.0043
