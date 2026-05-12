@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright (c) 2016-2026 by University of Kassel and Fraunhofer Institute for Energy Economics
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
@@ -23,7 +21,6 @@ from pandapower.estimation.util import set_bb_switch_impedance, reset_bb_switch_
 import logging
 std_logger = logging.getLogger(__name__)
 
-Algorithms = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
 ALGORITHM_MAPPING = {'wls': WLSAlgorithm,
                      'wls_with_zero_constraint': WLSZeroInjectionConstraintsAlgorithm,
                      'opt': OptAlgorithm,

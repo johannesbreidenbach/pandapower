@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright (c) 2016-2026 by University of Kassel and Fraunhofer Institute for Energy Economics
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
@@ -49,6 +47,11 @@ class BaseAlgebra:
         return (self.z - hx).ravel()
 
     def create_hx(self, E):
+        """
+        Attention could have bad side effects if allocation factor is used. Differences  in LPAlgorithm by E2V(E1) for
+        E and eppci.E
+        """
+
         f_bus, t_bus = self.fb, self.tb
         if self.eppci.algorithm in ["af-wls", "af-lp"]:
             num_clusters = len(self.eppci["clusters"])
@@ -91,6 +94,10 @@ class BaseAlgebra:
         return hx
 
     def create_hx_jacobian(self, E):
+        """
+        Attention could have bad side effects if allocation factor is used. Differences between
+        create_hx_jacobian(eppci.E) and create_hx_jacobian(E) in LPAlgorithm by E2V(E1).
+        """
         # Using sparse matrix in creation sub-jacobian matrix
         if self.eppci.algorithm in ["af-wls", "af-lp"]:
             num_clusters = len(self.eppci["clusters"])

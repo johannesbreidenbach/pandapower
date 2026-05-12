@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2016-2026 by University of Kassel and Fraunhofer Institute for Energy Economics
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
@@ -741,6 +740,7 @@ class ExtendedPPCI(UserDict):
         self.v = E[self.num_non_slack_bus:]
         self.delta[self.non_slack_buses] = E[:self.num_non_slack_bus]
 
+    # ToDo: remove E2V()
     def E2V(self, E):
         self.update_E(E)
         return self.V

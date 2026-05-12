@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright (c) 2016-2026 by University of Kassel and Fraunhofer Institute for Energy Economics
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
@@ -130,6 +128,7 @@ class LPAlgorithm(BaseAlgorithm):
                 m, n = H.shape
 
                 if wlav:
+                    # check that sigma is not near to zero prevent 1/0
                     sigma = np.maximum(LPAlgorithm._to_dense_auto(eppci.r_cov), 1e-5)
                     weights = 1.0 / sigma
                 else:
@@ -164,7 +163,7 @@ class LPAlgorithm(BaseAlgorithm):
                 self.logger.error(f'A problem appeared while running LAV estimation: {err}')
                 return False
 
-        self.check_result(current_error, cur_it)
+        self.check_result(current_error, cur_it)  # set self.successful to true if se works
         self.iterations = cur_it
 
         if debug_mode:
@@ -172,10 +171,20 @@ class LPAlgorithm(BaseAlgorithm):
             print(f'current_error = {current_error}, threshold = {self.tolerance}')
 
         if self.successful:
+            self.H = np.asarray(sem.create_hx_jacobian(E))  # ToDo: E or eppci.E
+            self.hx = sem.create_hx(E)  # ToDo: Which E or eppci.E should be used
             self.r = np.asarray(sem.create_rx(E)).reshape(-1)
-            self.H = np.asarray(sem.create_hx_jacobian(E))
-            # self.hx = sem.create_hx(eppci.E)  # ToDo: bei AF does not work
-
+        """
+        Attention: Bad side-effects
+        this works:
+            self.H = np.asarray(sem.create_hx_jacobian(eppci.E))
+            self.hx = sem.create_hx(E)
+            self.r = np.asarray(sem.create_rx(E)).reshape(-1)
+        this does not work:
+            self.hx =self.hx = sem.create_hx(E)
+            self.r = np.asarray(sem.create_rx(E)).reshape(-1)
+            self.H = np.asarray(sem.create_hx_jacobian(eppci.E))
+        """
 
         # split voltage and allocation factor variables
         # clusters are set in ppc_conversion.py/_add_rated_power_information_af_wls() only if algorithm == "af-wls"
