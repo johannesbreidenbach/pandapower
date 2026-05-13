@@ -42,7 +42,7 @@ def estimate(
         fuse_buses_with_bb_switch='all',
         debug_mode: bool = False,
         **opt_vars
-):
+) -> bool | dict[str, object]:
     """
     Wrapper function for WLS state estimation.
 
@@ -56,9 +56,11 @@ def estimate(
             - "irwls": iteratively reweighted WLS (robust estimation)
             - "lp": linear programming–based approach
             - "af-wls": WLS using allocation factors
-            - "af-lp": LP-based approach using allocation factors. This will add :math:`\\alpha`  in \
-                ppc_conversion.py :func:`_add_rated_power_information_af_wls` only if algorithm in ["af-wls", "af-lp"] \
-                however class LPAlgorithm will be used.
+            - "af-lp": LP-based approach using allocation factors.
+
+            The algorithms with allocation factor (af), "af-wls" and "af-lp", internally call upon the classes "wls"
+            :class:`WLSAlgorithm` and "lp" :class:`LPAlgorithm`. The allocation factor :math:`\\alpha` is handled in
+            `estimation/ppc_conversion.py` and `estimation/algorithm/matrix_base.py`.
 
         init (string): Initial voltage for the estimation. 'flat' sets 1.0 p.u. / 0° for all buses, 'results' uses the
             values from *res_bus* if available and 'slack' considers the slack bus voltage (and optionally, angle) as
@@ -106,10 +108,14 @@ def estimate(
 
     se = StateEstimation(net, tolerance, maximum_iterations, algorithm=algorithm)
     v_start, delta_start = _initialize_voltage(net, init)
-    return se.estimate(v_start=v_start, delta_start=delta_start,
+
+    return se.estimate(v_start=v_start,
+                       delta_start=delta_start,
                        zero_injection=zero_injection,
-                       fuse_buses_with_bb_switch=fuse_buses_with_bb_switch, 
-                       algorithm=algorithm, debug_mode=debug_mode, **opt_vars)
+                       fuse_buses_with_bb_switch=fuse_buses_with_bb_switch,
+                       debug_mode=debug_mode,
+                       **opt_vars
+                       )
 
 
 def remove_bad_data(net, init='flat', tolerance=1e-6, maximum_iterations=10,
@@ -200,8 +206,14 @@ class StateEstimation:
                  fuse_buses_with_bb_switch='all', algorithm='wls', debug_mode=False, **opt_vars):
         ...
 
-    def estimate(self, v_start='flat', delta_start='flat', zero_injection=None, 
-                 fuse_buses_with_bb_switch='all', algorithm='wls', debug_mode=False, **opt_vars):
+    def estimate(self,
+                 v_start='flat',
+                 delta_start='flat',
+                 zero_injection=None,
+                 fuse_buses_with_bb_switch='all',
+                 debug_mode=False,
+                 **opt_vars
+                 ) -> bool | dict[str, object]:
         """
         The function estimate is the main function of the module. It takes the inputs
         v_start and delta_start to initialize the state variables for the estimation process. 
@@ -248,6 +260,14 @@ class StateEstimation:
                 if one of the bus among the buses connected through bb switch is given, then all of them will still
                 be fused
         OUTPUT:
+            For "wls", "af-wls", "lp", "af-lp" will give back a dictionary with:
+
+                - "success": self.solver.successful,
+                - "num_iterations": self.solver.iterations,
+                - "objective_function_value": self.solver.obj_func,
+                - "allocation factor": self.solver.af,
+                - "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             **successful** (boolean) - True if the estimation process was successful
         Optional estimation variables:
             The bus power injections can be accessed with *se.s_node_powers* and the estimated
@@ -298,12 +318,12 @@ class StateEstimation:
             self.ppc, self.eppci = None, None
         
         if self.algorithm in ["wls", "af-wls", "lp", "af-lp"]:
-            now = datetime.now()
             se_results = {
                 "success": self.solver.successful,
                 "num_iterations": self.solver.iterations,
                 "objective_function_value": self.solver.obj_func,
-                "time": now.strftime("%Y-%m-%d %H:%M:%S")}
+                "allocation factor": self.solver.af,
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         else:
             se_results = self.solver.successful
 

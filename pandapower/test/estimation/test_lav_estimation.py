@@ -51,22 +51,22 @@ def _create_2bus_test_net() -> pandapowerNet:
     """
 
     net = create_empty_network()
-    create_bus(net, name='bus1', vn_kv=1.)
-    create_bus(net, name='bus2', vn_kv=1.)
+    create_bus(net, name="bus1", vn_kv=1.)
+    create_bus(net, name="bus2", vn_kv=1.)
     create_ext_grid(net, 0)
     create_line_from_parameters(
         net, 0, 1, 1, r_ohm_per_km=1, x_ohm_per_km=0.5, c_nf_per_km=0, max_i_ka=1
     )
 
-    # create_measurement(net, 'p', 'line', 0.0111, 0.05, 0, 'from')
-    # create_measurement(net, 'q', 'line', 0.06, 0.05, 0, 'from')
-    # create_measurement(net, 'v', 'bus', 1.019, 0.01, 0)
-    # create_measurement(net, 'v', 'bus', 1.04, 0.01, 1)
+    # create_measurement(net, "p", "line", 0.0111, 0.05, 0, "from")
+    # create_measurement(net, "q", "line", 0.06, 0.05, 0, "from")
+    # create_measurement(net, "v", "bus", 1.019, 0.01, 0)
+    # create_measurement(net, "v", "bus", 1.04, 0.01, 1)
 
-    create_measurement(net, 'p', 'line', 0.0111, 0.005, 0, 'from')
-    create_measurement(net, 'q', 'line', 0.06, 0.5, 0, 'from')
-    create_measurement(net, 'v', 'bus', 1.019, 0.01, 0)
-    create_measurement(net, 'v', 'bus', 1.04, 0.1, 1)
+    create_measurement(net, "p", "line", 0.0111, 0.005, 0, "from")
+    create_measurement(net, "q", "line", 0.06, 0.5, 0, "from")
+    create_measurement(net, "v", "bus", 1.019, 0.01, 0)
+    create_measurement(net, "v", "bus", 1.04, 0.1, 1)
 
     return net
 
@@ -117,14 +117,14 @@ def test_2bus_lav_wlav() -> None:
     net_wls = _create_2bus_test_net()
 
     # Run estimations
-    if not estimate(net_lav, algorithm='lp', wlav=False, with_ortools=False, init='flat'):
-        raise AssertionError('LAV estimation failed!')
+    if not estimate(net_lav, algorithm="lp", wlav=False, with_ortools=False, init="flat"):
+        raise AssertionError("LAV estimation failed!")
 
-    if not estimate(net_wlav, algorithm='lp', wlav=True, with_ortools=False, init='flat'):
-        raise AssertionError('WLAV estimation failed!')
+    if not estimate(net_wlav, algorithm="lp", wlav=True, with_ortools=False, init="flat"):
+        raise AssertionError("WLAV estimation failed!")
 
-    if not estimate(net_wls, init='flat'):
-        raise AssertionError('Estimation failed!')
+    if not estimate(net_wls, init="flat"):
+        raise AssertionError("Estimation failed!")
 
     # Extract results
     v_lav = net_lav.res_bus_est.vm_pu.values
@@ -137,26 +137,26 @@ def test_2bus_lav_wlav() -> None:
     delta_wls = net_wls.res_bus_est.va_degree.values
 
     res_df = pd.DataFrame({
-        'V WLS': v_wls,
-        'angle Wls': delta_wls,
-        'V LAV': v_lav,
-        'angle LAV': delta_lav,
-        'V WLAV': v_wlav,
-        'angle WLAV': delta_wlav
+        "V WLS": v_wls,
+        "angle Wls": delta_wls,
+        "V LAV": v_lav,
+        "angle LAV": delta_lav,
+        "V WLAV": v_wlav,
+        "angle WLAV": delta_wlav
     })
 
     # Basic sanity checks
-    assert np.all(np.isfinite(v_lav)), 'LAV voltage contains invalid values'
-    assert np.all(np.isfinite(delta_lav)), 'LAV angle contains invalid values'
-    assert np.all(np.isfinite(v_wlav)), 'WLAV voltage contains invalid values'
-    assert np.all(np.isfinite(delta_wlav)), 'WLAV angle contains invalid values'
+    assert np.all(np.isfinite(v_lav)), "LAV voltage contains invalid values"
+    assert np.all(np.isfinite(delta_lav)), "LAV angle contains invalid values"
+    assert np.all(np.isfinite(v_wlav)), "WLAV voltage contains invalid values"
+    assert np.all(np.isfinite(delta_wlav)), "WLAV angle contains invalid values"
 
     # Known LAV reference (empirically determined)
     target_v_lav = np.array([1.019, 1.04])
     target_delta_lav = np.array([0.0, 4.5479048])
 
 
-def test_cigre_network(init='flat'):
+def test_cigre_network(init="flat"):
     """
        Run power flow and three different state estimations (WLS, LAV, WLAV) on a CIGRE MV network and return bus
        voltages, angles, and deviations.
@@ -171,10 +171,10 @@ def test_cigre_network(init='flat'):
        Returns:
            DataFrame with columns:
            ``[
-               'V PF', 'angle PF',
-               'V WLS', 'angle WLS', 'dV WLS', 'dAngle WLS',
-               'V LAV', 'angle LAV', 'dV LAV', 'dAngle LAV',
-               'V WLAV', 'angle WLAV', 'dV WLAV', 'dAngle WLAV'
+               "V PF", "angle PF",
+               "V WLS", "angle WLS", "dV WLS", "dAngle WLS",
+               "V LAV", "angle LAV", "dV LAV", "dAngle LAV",
+               "V WLAV", "angle WLAV", "dV WLAV", "dAngle WLAV"
            ]``.
        """
     # 1. create network
@@ -230,7 +230,7 @@ def test_cigre_network(init='flat'):
         delta_wls = net_wls.res_bus_est.va_degree.values
 
     # AF-WLS
-    if not estimate(net_afwls, algorithm='af-wls', init="flat", wlav=False):
+    if not estimate(net_afwls, algorithm="af-wls", init="flat", wlav=False):
         failures.append("AF-WLS estimation failed")
         v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -239,7 +239,7 @@ def test_cigre_network(init='flat'):
         delta_afwls = net_wls.res_bus_est.va_degree.values
 
     # LAV
-    if not estimate(net_lav, algorithm='lp', wlav=False, with_ortools=False, init="flat", debug_mode=False):
+    if not estimate(net_lav, algorithm="lp", wlav=False, with_ortools=False, init="flat", debug_mode=False):
         failures.append("LAV estimation failed")
         v_lav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_lav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -248,7 +248,7 @@ def test_cigre_network(init='flat'):
         delta_lav = net_lav.res_bus_est.va_degree.values
 
     # WLAV
-    if not estimate(net_wlav, algorithm='lp', wlav=True, with_ortools=False, init="flat", debug_mode=False):
+    if not estimate(net_wlav, algorithm="lp", wlav=True, with_ortools=False, init="flat", debug_mode=False):
         failures.append("WLAV estimation failed")
         v_wlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_wlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -360,7 +360,7 @@ def _create_network_with_measurements() -> pandapowerNet:
     return net_base
 
 
-def test_general_function(init='flat'):
+def test_general_function(init="flat"):
     """
        Run power flow and three different state estimations (WLS, LAV, WLAV) on different networks and return bus
        voltages, angles, and deviations.
@@ -375,10 +375,10 @@ def test_general_function(init='flat'):
        Returns:
            DataFrame with columns:
            ``[
-               'V PF', 'angle PF',
-               'V WLS', 'angle WLS', 'dV WLS', 'dAngle WLS',
-               'V LAV', 'angle LAV', 'dV LAV', 'dAngle LAV',
-               'V WLAV', 'angle WLAV', 'dV WLAV', 'dAngle WLAV'
+               "V PF", "angle PF",
+               "V WLS", "angle WLS", "dV WLS", "dAngle WLS",
+               "V LAV", "angle LAV", "dV LAV", "dAngle LAV",
+               "V WLAV", "angle WLAV", "dV WLAV", "dAngle WLAV"
            ]``.
        """
 
@@ -395,7 +395,8 @@ def test_general_function(init='flat'):
     # 4. run estimations with soft-fail (collect errors, do not raise immediately)
     failures = []
     # WLS
-    if not estimate(net_wls, init="flat", wlav=False):
+    WLS = estimate(net_wls, init="flat", wlav=False)
+    if not WLS["success"]:
         failures.append("WLS estimation failed")
         v_wls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_wls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -404,7 +405,8 @@ def test_general_function(init='flat'):
         delta_wls = net_wls.res_bus_est.va_degree.values
 
     # AF-WLS
-    if not estimate(net_afwls, algorithm='af-wls', init="flat", wlav=False):
+    AFWLS = estimate(net_afwls, algorithm="af-wls", init="flat", wlav=False)
+    if not AFWLS["success"]:
         failures.append("AF-WLS estimation failed")
         v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -413,7 +415,8 @@ def test_general_function(init='flat'):
         delta_afwls = net_wls.res_bus_est.va_degree.values
 
     # LAV
-    if not estimate(net_lav, algorithm='lp', wlav=False, with_ortools=False, init="flat", debug_mode=False):
+    LAV = estimate(net_lav, algorithm="lp", wlav=False, with_ortools=False, init="flat", debug_mode=False)
+    if not LAV["success"]:
         failures.append("LAV estimation failed")
         v_lav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_lav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -422,7 +425,8 @@ def test_general_function(init='flat'):
         delta_lav = net_lav.res_bus_est.va_degree.values
 
     # WLAV
-    if not estimate(net_wlav, algorithm='lp', wlav=True, with_ortools=False, init="flat", debug_mode=False):
+    WLAV = estimate(net_wlav, algorithm="lp", wlav=True, with_ortools=False, init="flat", debug_mode=False)
+    if not WLAV["success"]:
         failures.append("WLAV estimation failed")
         v_wlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_wlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -430,8 +434,9 @@ def test_general_function(init='flat'):
         v_wlav = net_wlav.res_bus_est.vm_pu.values
         delta_wlav = net_wlav.res_bus_est.va_degree.values
 
-    # AF-WLAF
-    if not estimate(net_afwlav, algorithm='af-lp', wlav=True, with_ortools=False, init="flat", debug_mode=False):
+    # AF-WLAV
+    AFWLAV = estimate(net_afwlav, algorithm="af-lp", wlav=True, with_ortools=False, init="flat", debug_mode=False)
+    if not AFWLAV["success"]:
         failures.append("AF-WLAV estimation failed")
         v_afwlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -495,16 +500,16 @@ def test_general_function(init='flat'):
 
     res_max_diff_df = pd.DataFrame(
         data={
-            'WLS V': [np.max(np.abs(dV_wls))],
-            'WLS A': [np.max(np.abs(dAngle_wls))],
-            'AF WLS V': [np.max(np.abs(dV_afwls))],
-            'AF WLS A': [np.max(np.abs(dAngle_afwls))],
-            'VLA V': [np.max(np.abs(dV_lav))],
-            'VLA A': [np.max(np.abs(dAngle_lav))],
-            'WLAV V': [np.max(np.abs(dV_wlav))],
-            'WLAV A': [np.max(np.abs(dAngle_wlav))],
-            'AF WLAV V': [np.max(np.abs(dV_afwlav))],
-            'AF WLAV A': [np.max(np.abs(dAngle_afwlav))]
+            "WLS V": [np.max(np.abs(dV_wls))],
+            "WLS A": [np.max(np.abs(dAngle_wls))],
+            "AF WLS V": [np.max(np.abs(dV_afwls))],
+            "AF WLS A": [np.max(np.abs(dAngle_afwls))],
+            "VLA V": [np.max(np.abs(dV_lav))],
+            "VLA A": [np.max(np.abs(dAngle_lav))],
+            "WLAV V": [np.max(np.abs(dV_wlav))],
+            "WLAV A": [np.max(np.abs(dAngle_wlav))],
+            "AF WLAV V": [np.max(np.abs(dV_afwlav))],
+            "AF WLAV A": [np.max(np.abs(dAngle_afwlav))]
         }
     )
 
