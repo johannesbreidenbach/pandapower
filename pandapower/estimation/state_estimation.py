@@ -29,7 +29,7 @@ ALGORITHM_MAPPING = {'wls': WLSAlgorithm,
                      'af-wls': WLSAlgorithm,
                      'af-lp': LPAlgorithm}
 Algorithms = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
-ALLOWED_OPT_VAR = {"a", "opt_method", "estimator"}
+ALLOWED_OPT_VAR = {"a", "opt_method", "estimator", "linprog_method", "wlav", "with_ortools"}
 
 
 def estimate(
@@ -42,7 +42,7 @@ def estimate(
         fuse_buses_with_bb_switch='all',
         debug_mode: bool = False,
         **opt_vars
-) -> bool | dict[str, object]:
+) -> dict[str, object]:
     """
     Wrapper function for WLS state estimation.
 
@@ -213,7 +213,7 @@ class StateEstimation:
                  fuse_buses_with_bb_switch='all',
                  debug_mode=False,
                  **opt_vars
-                 ) -> bool | dict[str, object]:
+                 ) -> dict[str, object]:
         """
         The function estimate is the main function of the module. It takes the inputs
         v_start and delta_start to initialize the state variables for the estimation process. 
@@ -325,7 +325,7 @@ class StateEstimation:
                 "allocation factor": self.solver.af,
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         else:
-            se_results = self.solver.successful
+            se_results = {"success":self.solver.successful}
 
         return se_results
 
@@ -463,7 +463,7 @@ class StateEstimation:
                 # Compute normalized residuals (r^N_i = |r_i|/sqrt{Omega_ii}):
                 rN = np.dot(OmegaInv, np.absolute(self.solver.r))
 
-                if max(rN) <= rn_max_threshold:
+                if float(max(rN)) <= rn_max_threshold:
                     self.logger.debug("Largest normalized residual test passed. No bad data detected.")
                     return True
                 else:

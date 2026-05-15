@@ -411,8 +411,8 @@ def test_general_function(init="flat"):
         v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
     else:
-        v_afwls = net_wls.res_bus_est.vm_pu.values
-        delta_afwls = net_wls.res_bus_est.va_degree.values
+        v_afwls = net_afwls.res_bus_est.vm_pu.values
+        delta_afwls = net_afwls.res_bus_est.va_degree.values
 
     # LAV
     LAV = estimate(net_lav, algorithm="lp", wlav=False, with_ortools=False, init="flat", debug_mode=False)
@@ -441,8 +441,8 @@ def test_general_function(init="flat"):
         v_afwlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
     else:
-        v_afwlav = net_wlav.res_bus_est.vm_pu.values
-        delta_afwlav = net_wlav.res_bus_est.va_degree.values
+        v_afwlav = net_afwlav.res_bus_est.vm_pu.values
+        delta_afwlav = net_afwlav.res_bus_est.va_degree.values
 
     # 5. power flow results (runpp) aus net_base
     v_pf = net_base.res_bus.vm_pu.values
@@ -504,8 +504,8 @@ def test_general_function(init="flat"):
             "WLS A": [np.max(np.abs(dAngle_wls))],
             "AF WLS V": [np.max(np.abs(dV_afwls))],
             "AF WLS A": [np.max(np.abs(dAngle_afwls))],
-            "VLA V": [np.max(np.abs(dV_lav))],
-            "VLA A": [np.max(np.abs(dAngle_lav))],
+            "LAV V": [np.max(np.abs(dV_lav))],
+            "LAV A": [np.max(np.abs(dAngle_lav))],
             "WLAV V": [np.max(np.abs(dV_wlav))],
             "WLAV A": [np.max(np.abs(dAngle_wlav))],
             "AF WLAV V": [np.max(np.abs(dV_afwlav))],
@@ -529,6 +529,10 @@ def test_general_function(init="flat"):
     if "WLAV estimation failed" not in failures:
         assert np.nanmax(abs(dV_wlav)) < 0.0043
         assert np.nanmax(abs(dAngle_wlav)) < 0.2
+
+    if "AF-WLAV estimation failed" not in failures:
+        assert np.nanmax(abs(dV_afwlav)) < 0.0043
+        assert np.nanmax(abs(dAngle_afwlav)) < 0.2
 
     # 9. Evaluate the overall result at the end
     if failures:
