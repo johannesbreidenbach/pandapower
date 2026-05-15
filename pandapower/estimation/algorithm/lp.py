@@ -133,7 +133,6 @@ class LPAlgorithm(BaseAlgorithm):
                 if af_lp:
                     # u_i >= 0, dE free, 0 <= alpha_i <= 1
                     bounds = LPAlgorithm._create_af_bounds(n, m, len(self.eppci["clusters"]), E)
-                    # bounds = [(None, None)] * n + [(0, None)] * m
                 else:
                     # u_i >= 0, dE free
                     bounds = [(None, None)] * n + [(0, None)] * m
@@ -146,7 +145,7 @@ class LPAlgorithm(BaseAlgorithm):
                     weights = np.ones(m)
 
                 if with_ortools:
-                    d_E, obj_value = self._solve_lav_ortools(H, r, weights)
+                    d_E, obj_value = self._solve_lav_ortools(H, r, weights, bounds)
                 else:
                     d_E, obj_value = self._solve_lav_scipy(H, r, weights, linprog_method, bounds)
 
@@ -217,7 +216,7 @@ class LPAlgorithm(BaseAlgorithm):
             E: NDArray[np.float64]
     ) -> list[tuple[float, None] | tuple[float, float] | tuple[None, None]]:
         r"""
-        Create variable bounds for the LAV/WLAV linear programming problem.
+        Create variable bounds for the allocation factors LAV/WLAV linear programming problem.
 
         The LP variable vector is:
 
@@ -436,7 +435,8 @@ class LPAlgorithm(BaseAlgorithm):
     def _solve_lav_ortools(
             H: csr_matrix,
             r: NDArray[np.float64],
-            weights: NDArray[np.float64]
+            weights: NDArray[np.float64],
+            bounds: list[tuple[float, None] | tuple[float, float] | tuple[None, None]]
     ) -> tuple[NDArray[np.float64], float]:
         r"""
         Solve the (weighted) Least Absolute Value (LAV/WLAV) state estimation subproblem using
@@ -515,6 +515,10 @@ class LPAlgorithm(BaseAlgorithm):
                 Weight vector used for WLAV. Typical choices ``weights = np.ones(m)`` (Standard LAV) and
                 ``weights = 1 / sigma`` (Weighted LAV)
 
+            bounds:
+                Bounds for solve minimization. :math:`0 \le u_{i}`, dE free, 0 <= alpha_i <= 1
+
+
         Raises:
             numpy.linalg.LinAlgError:
                 If OR-Tools SCIP is unavailable or if the optimization fails.
@@ -553,21 +557,32 @@ class LPAlgorithm(BaseAlgorithm):
 
         # State update variables:
         #
-        # dE_j ∈ (-∞, +∞)
-        # These are free variables because voltage magnitudes and voltage angles may increase or decrease
-        dE = [
-            solver.NumVar(-infinity, infinity, f"dE_{j}") for j in range(n)
-        ]
+        # bounds contains bounds for the full LP vector:
+        # y = [dE_1, ..., dE_n, u_1, ..., u_m]
+        #
+        # Therefore, the first n entries belong to dE.
+        dE = []
+        for j in range(n):
+            lower, upper = bounds[j]
+
+            lb = -infinity if lower is None else float(lower)
+            ub = infinity if upper is None else float(upper)
+
+            dE.append(solver.NumVar(lb, ub, f"dE_{j}"))
 
         # Auxiliary residual magnitude variables:
         # u_i >= 0
         # These variables represent:
         # |r_i - H_i dE|
         # and are minimized in the objective function
-        u = [
-            solver.NumVar(0.0, infinity, f"u_{i}")
-            for i in range(m)
-        ]
+        u = []
+        for i in range(m):
+            lower, upper = bounds[n + i]
+
+            lb = 0.0 if lower is None else float(lower)
+            ub = infinity if upper is None else float(upper)
+
+            u.append(solver.NumVar(lb, ub, f"u_{i}"))
 
         # ------------------------------------------------------------------
         # Add inequality constraints
@@ -591,11 +606,7 @@ class LPAlgorithm(BaseAlgorithm):
             # H_i dE = Σ_j H_ij * dE_j
             #
             # Only nonzero Jacobian entries are processed
-            h_expr = solver.Sum(
-                vals[k] * dE[cols[k]]
-                for k in range(len(vals))
-                if abs(vals[k]) > error_margin
-            )
+            h_expr = solver.Sum(vals[k] * dE[cols[k]] for k in range(len(vals)) if abs(vals[k]) > error_margin)
 
             # Constraint:
             # H_i dE - u_i <= r_i
