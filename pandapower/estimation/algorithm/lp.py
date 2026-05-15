@@ -114,8 +114,11 @@ class LPAlgorithm(BaseAlgorithm):
 
         # matrix calculation object for the state estimation parameter
         sem = BaseAlgebra(eppci)
-        current_error, cur_it = 100., 0
+        current_error = 100.
+        cur_it = 0  # is separate and later set to self.iterations. Reason…
         E = eppci.E
+
+        af_lp: bool = (eppci.algorithm == "af-lp")
 
         while current_error > self.tolerance and cur_it < self.max_iterations:
             try:
@@ -127,6 +130,14 @@ class LPAlgorithm(BaseAlgorithm):
                 # m number of measurements -> z element R^{m}, n number of state variable
                 m, n = H.shape
 
+                if af_lp:
+                    # u_i >= 0, dE free, 0 <= alpha_i <= 1
+                    bounds = LPAlgorithm._create_af_bounds(n, m, len(self.eppci["clusters"]), E)
+                    # bounds = [(None, None)] * n + [(0, None)] * m
+                else:
+                    # u_i >= 0, dE free
+                    bounds = [(None, None)] * n + [(0, None)] * m
+
                 if wlav:
                     # check that sigma is not near to zero prevent 1/0
                     sigma = np.maximum(LPAlgorithm._to_dense_auto(eppci.r_cov), 1e-5)
@@ -137,7 +148,7 @@ class LPAlgorithm(BaseAlgorithm):
                 if with_ortools:
                     d_E, obj_value = self._solve_lav_ortools(H, r, weights)
                 else:
-                    d_E, obj_value = self._solve_lav_scipy(H, r, weights, linprog_method)
+                    d_E, obj_value = self._solve_lav_scipy(H, r, weights, linprog_method, bounds)
 
                 current_error = float(np.max(np.abs(d_E)))
 
@@ -199,6 +210,61 @@ class LPAlgorithm(BaseAlgorithm):
         return eppci
 
     @staticmethod
+    def _create_af_bounds(
+            n: int,
+            m: int,
+            num_clusters: int,
+            E: NDArray[np.float64]
+    ) -> list[tuple[float, None] | tuple[float, float] | tuple[None, None]]:
+        r"""
+        Create variable bounds for the LAV/WLAV linear programming problem.
+
+        The LP variable vector is:
+
+        .. math::
+            y = [\Delta E_1, \ldots, \Delta E_n, u_1, \ldots, u_m]^\top
+
+        with:
+
+        .. math::
+            E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}, \alpha_{i}]^\top
+
+        For standard state variables, the state update ``dE`` is unconstrained. If allocation factors are present, they
+        are assumed to be the last ``num_clusters`` entries of ``E`` and are constrained such that:
+
+        .. math::
+            0 \le \alpha_{\mathrm{old}} + \Delta\alpha \le 1
+
+        which leads to:
+
+            .. math::
+                -\alpha_{\mathrm{old}} \le \Delta\alpha \le 1 - \alpha_{\mathrm{old}}
+
+        The auxiliary variables ``u`` are constrained to be nonnegative.
+
+        Parameters:
+            n:
+                Number of state variables.
+            m:
+                Number of measurements.
+            num_clusters:
+                Number of different clusters in power grid.
+            E:
+                current state vector with :math:`E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}, \alpha_{i}]`
+                the values :math:`\alpha_{i}` are existing if the allocation factors are used.
+        Returns:
+            Bounds list for ``scipy.optimize.linprog``.
+        """
+        af_bounds = []
+        alpha_old = E[-num_clusters:]
+        for k in range(num_clusters):
+            lower_bound = -alpha_old[k]
+            upper_bound = 1. - alpha_old[k]
+            af_bounds.append((float(lower_bound), float(upper_bound)))
+        bounds = [(None, None)] * (n - num_clusters) + af_bounds + [(0, None)] * m
+        return bounds
+
+    @staticmethod
     def _to_dense_auto(x: ArrayLike) -> np.ndarray:
         """
         Convert input to a dense NumPy array and automatically adjust its shape.
@@ -232,7 +298,8 @@ class LPAlgorithm(BaseAlgorithm):
             H: csr_matrix,
             r: NDArray[np.float64],
             weights: NDArray[np.float64],
-            linprog_method: LinprogMethod
+            linprog_method: LinprogMethod,
+            bounds: list[tuple[float, None] | tuple[float, float] | tuple[None, None]]
     ) -> tuple[NDArray[np.float64], float]:
         r"""
         Solve the LAV/WLAV linear programming problem using :func:`scipy.optimize.linprog`.
@@ -262,17 +329,17 @@ class LPAlgorithm(BaseAlgorithm):
         The inequality constraints are assembled into the standard LP form:
 
         .. math::
-            A_{ub} \, y \le b_{ub}
+            A_{\mathrm{ub}} \, y \le b_{\mathrm{ub}}
 
         with:
 
         .. math::
-            A_{ub} = \begin{bmatrix} -H & -I \\ H & -I \end{bmatrix}
+            A_{\mathrm{ub}} = \begin{bmatrix} -H & -I \\ H & -I \end{bmatrix}
 
         and:
 
         .. math::
-            b_{ub} = \begin{bmatrix} -r \\ r \end{bmatrix}
+            b_{\mathrm{ub}} = \begin{bmatrix} -r \\ r \end{bmatrix}
 
         which corresponds to:
 
@@ -283,13 +350,19 @@ class LPAlgorithm(BaseAlgorithm):
              H \Delta E - u \le r
 
         Sparse matrices are used throughout the formulation to improve performance and memory efficiency for large-scale
-        power systems.
+        power systems. For the allocation factors :math:`E` is defined as:
+
+        .. math::
+            E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}, \alpha_{i}]^\top
+
+        with :math:`i` number of clusters.
 
         Parameters:
             H: Sparse Jacobian matrix with shape ``(m, n)``.
             r: Residual vector ``z - h(x)`` with shape ``(m,)``.
             weights: Weight vector for WLAV. For standard LAV, this is typically ``np.ones(m)``.
             linprog_method: Method passed to ``scipy.optimize.linprog`` (e.g. ``"highs"``).
+            bounds: Bounds for solve minimization. :math:`0 \le u_{i}`, dE free, 0 <= alpha_i <= 1
 
         Raises:
             numpy.linalg.LinAlgError: If the LP optimization fails or no feasible solution is found.
@@ -337,9 +410,6 @@ class LPAlgorithm(BaseAlgorithm):
         # ub stands for upper bound -> A_ub * y <= b_ub
         A_ub = vstack([A1, A2], format="csr")
         b_ub = np.r_[b1, b2]
-
-        # u_i >= 0, dE free
-        bounds = [(None, None)] * n + [(0, None)] * m
 
         result = linprog(
             c,
