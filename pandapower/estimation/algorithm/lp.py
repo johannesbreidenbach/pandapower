@@ -130,6 +130,7 @@ class LPAlgorithm(BaseAlgorithm):
                 # m number of measurements -> z element R^{m}, n number of state variable
                 m, n = H.shape
 
+                # set bounds depend on allocation factor for solving the linear programming problem
                 if af_lp:
                     # u_i >= 0, dE free, 0 <= alpha_i <= 1
                     bounds = LPAlgorithm._create_af_bounds(n, m, len(self.eppci["clusters"]), E)
@@ -228,8 +229,8 @@ class LPAlgorithm(BaseAlgorithm):
         .. math::
             E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}, \alpha_{i}]^\top
 
-        For standard state variables, the state update ``dE`` is unconstrained. If allocation factors are present, they
-        are assumed to be the last ``num_clusters`` entries of ``E`` and are constrained such that:
+        For standard state variables, the state update ``dE`` = :math:`\Delta E` is unconstrained. If allocation factors are present, they
+        are assumed to be the last :math:`i` ``num_clusters`` entries of ``E`` = :math:`E` and are constrained such that:
 
         .. math::
             0 \le \alpha_{\mathrm{old}} + \Delta\alpha \le 1
@@ -239,7 +240,7 @@ class LPAlgorithm(BaseAlgorithm):
             .. math::
                 -\alpha_{\mathrm{old}} \le \Delta\alpha \le 1 - \alpha_{\mathrm{old}}
 
-        The auxiliary variables ``u`` are constrained to be nonnegative.
+        The auxiliary variables :math:`u` are constrained to be nonnegative.
 
         Parameters:
             n:
