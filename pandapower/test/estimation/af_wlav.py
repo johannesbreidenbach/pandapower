@@ -295,17 +295,17 @@ def _create_18_bus_grid_af(
     # In pandapower:
     #     loads are modeled as positive consumption
     #
-    PL_res = 2 * np.array([0.05, 0.08, 0, 0.05, 0, 0.06, 0, 0.02, 0.04, 0, 0.09, 0, 0.08, 0, 0, 0.05, 0.07])
-    QL_res = 2 * np.array([0.01, 0.02, 0, 0.01, 0, 0.01, 0, 0.01, 0.01, 0, 0.01, 0, 0.01, 0, 0, 0.01, 0.01])
+    p_l_res = 2 * np.array([0.05, 0.08, 0, 0.05, 0, 0.06, 0, 0.02, 0.04, 0, 0.09, 0, 0.08, 0, 0, 0.05, 0.07])
+    q_l_res = 2 * np.array([0.01, 0.02, 0, 0.01, 0, 0.01, 0, 0.01, 0.01, 0, 0.01, 0, 0.01, 0, 0, 0.01, 0.01])
 
-    PL_com = np.array([0.03, 0.08, 0, 0.05, 0, 0.05, 0, 0.07, 0.03, 0, 0.01, 0, 0.03, 0, 0, 0.01, 0.02])
-    QL_com = np.array([0.02, 0.02, 0, 0.01, 0, 0.01, 0, 0.01, 0.01, 0, 0.01, 0, 0.01, 0, 0, 0.01, 0.01])
+    p_l_com = np.array([0.03, 0.08, 0, 0.05, 0, 0.05, 0, 0.07, 0.03, 0, 0.01, 0, 0.03, 0, 0, 0.01, 0.02])
+    q_l_com = np.array([0.02, 0.02, 0, 0.01, 0, 0.01, 0, 0.01, 0.01, 0, 0.01, 0, 0.01, 0, 0, 0.01, 0.01])
 
-    PG_pv = np.array([0.04, 0.05, 0, 0.02, 0, 0.08, 0, 0.05, 0.03, 0, 0.04, 0, 0.05, 0, 0, 0.07, 0.02])
-    QG_pv = -np.array([0.00, 0.00, 0, 0.00, 0, 0.01, 0, 0.00, 0.00, 0, 0.00, 0, 0.01, 0, 0, 0.00, 0.00])
+    p_g_pv = np.array([0.04, 0.05, 0, 0.02, 0, 0.08, 0, 0.05, 0.03, 0, 0.04, 0, 0.05, 0, 0, 0.07, 0.02])
+    q_g_pv = -np.array([0.00, 0.00, 0, 0.00, 0, 0.01, 0, 0.00, 0.00, 0, 0.00, 0, 0.01, 0, 0, 0.00, 0.00])
 
-    PG_wind = np.array([0.00, 0.00, 0, 0.07, 0, 0.00, 0, 0.00, 0.03, 0, 0.00, 0, 0.08, 0, 0, 0.04, 0.04])
-    QG_wind = -np.array([0.00, 0.00, 0, 0.00, 0, 0.00, 0, 0.00, 0.01, 0, 0.00, 0, 0.01, 0, 0, 0.00, 0.00])
+    p_g_wind = np.array([0.00, 0.00, 0, 0.07, 0, 0.00, 0, 0.00, 0.03, 0, 0.00, 0, 0.08, 0, 0, 0.04, 0.04])
+    q_g_wind = -np.array([0.00, 0.00, 0, 0.00, 0, 0.00, 0, 0.00, 0.01, 0, 0.00, 0, 0.01, 0, 0, 0.00, 0.00])
 
     # Dictionary storing the random scaling factors
     k_dc = {
@@ -333,30 +333,30 @@ def _create_18_bus_grid_af(
         # Wind:
         #     20% - 40%
         #
-        varLres = 0.5 + 0.3 * np.random.rand()
-        varLcom = 0.3 + 0.3 * np.random.rand()
-        varGpv = 0.3 + 0.1 * np.random.rand()
-        varGwind = 0.2 + 0.2 * np.random.rand()
+        var_l_res = 0.5 + 0.3 * np.random.rand()
+        var_l_com = 0.3 + 0.3 * np.random.rand()
+        var_g_pv = 0.3 + 0.1 * np.random.rand()
+        var_g_wind = 0.2 + 0.2 * np.random.rand()
 
-        k_dc["KL_res"][idx] = varLres
-        k_dc["KL_com"][idx] = varLcom
-        k_dc["KG_pv"][idx] = varGpv
-        k_dc["KG_wind"][idx] = varGwind
+        k_dc["KL_res"][idx] = var_l_res
+        k_dc["KL_com"][idx] = var_l_com
+        k_dc["KG_pv"][idx] = var_g_pv
+        k_dc["KG_wind"][idx] = var_g_wind
 
         # =====================================================================
         # Apply scaling factors to nominal per-unit values
         # =====================================================================
-        p_res_pu = float(PL_res[idx] * varLres)
-        q_res_pu = float(QL_res[idx] * varLres)
+        p_res_pu = float(p_l_res[idx] * var_l_res)
+        q_res_pu = float(q_l_res[idx] * var_l_res)
 
-        p_com_pu = float(PL_com[idx] * varLcom)
-        q_com_pu = float(QL_com[idx] * varLcom)
+        p_com_pu = float(p_l_com[idx] * var_l_com)
+        q_com_pu = float(q_l_com[idx] * var_l_com)
 
-        p_pv_pu = float(PG_pv[idx] * varGpv)
-        q_pv_pu = float(QG_pv[idx] * varGpv)
+        p_pv_pu = float(p_g_pv[idx] * var_g_pv)
+        q_pv_pu = float(q_g_pv[idx] * var_g_pv)
 
-        p_wind_pu = float(PG_wind[idx] * varGwind)
-        q_wind_pu = float(QG_wind[idx] * varGwind)
+        p_wind_pu = float(p_g_wind[idx] * var_g_wind)
+        q_wind_pu = float(q_g_wind[idx] * var_g_wind)
 
         # =====================================================================
         # Convert per-unit values to MW / MVAr
@@ -426,7 +426,7 @@ def _create_18_bus_grid_af(
     #
     #   - the network is radial
     #   - the network has high R/X ratios
-    #   - some lines have very small reactances
+    #   - some lines have very small reactance
     #
     # BFSW is numerically more robust for distribution grids than Newton-Raphson in this case.
     #
