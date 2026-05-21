@@ -322,7 +322,7 @@ class StateEstimation:
                 "success": self.solver.successful,
                 "num_iterations": self.solver.iterations,
                 "objective_function_value": self.solver.obj_func,
-                "allocation factor": self.solver.af,
+                "allocation_factors": self.solver.af,
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         else:
             se_results = {"success":self.solver.successful}

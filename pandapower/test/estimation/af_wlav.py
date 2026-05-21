@@ -631,6 +631,11 @@ def test_general_function(net_base: pandapowerNet, init="flat"):
             "AF WLAV A": [np.max(np.abs(dAngle_afwlav))]
         }
     )
+    AFWLS["allocation_factors"].index = ["AF-WLS"]
+    AFWLAV["allocation_factors"].index = ["AF-WLAV"]
+    AFLAV["allocation_factors"].index = ["AF-LAV"]
+
+    res_af_df = pd.concat([AFWLS["allocation_factors"], AFWLAV["allocation_factors"],AFLAV["allocation_factors"]])
 
     # 8. Checks: apply only to successful estimates
     if "AF-WLS estimation failed" not in failures:
