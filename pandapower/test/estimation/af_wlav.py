@@ -208,9 +208,9 @@ def _create_18_bus_grid_af(
     z_base = (v_b ** 2) / base_mva  # Ohm
 
     # =========================================================================
-    # Create empty power network
+    # Create empty power network for power flow calculation
     # =========================================================================
-    net: pandapowerNet = create_empty_network(sn_mva=base_mva, f_hz=50)
+    net_pf: pandapowerNet = create_empty_network(sn_mva=base_mva, f_hz=50)
 
     # =========================================================================
     # 1) Buses
@@ -225,13 +225,13 @@ def _create_18_bus_grid_af(
     #
     buses = []
     for i in range(1, 19):
-        bus = create_bus(net, vn_kv=v_b, name=f"Bus {i}")
+        bus = create_bus(net_pf, vn_kv=v_b, name=f"Bus {i}")
         buses.append(bus)
     # Create slack bus / external grid connection
     # vm_pu: voltage magnitude in per-unit
     # degree: voltage angle in degrees
     #
-    create_ext_grid(net, bus=buses[0], vm_pu=slack_v, degree=slack_va_degree, name="Slack")
+    create_ext_grid(net_pf, bus=buses[0], vm_pu=slack_v, degree=slack_va_degree, name="Slack")
 
     # =========================================================================
     # 2) Lines
@@ -239,11 +239,11 @@ def _create_18_bus_grid_af(
     start = np.array([1, 2, 3, 4, 5, 6, 6, 8, 9, 10, 11, 11, 13, 4, 15, 16, 16])
     end   = np.array([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18])
     # Per-unit line resistances
-    r_pu = np.array([0.0000, 0.0174, 0.0001, 0.0052, 0.0003, 0.0010, 0.0017, 0.0022, 0.0001, 0.0016, 0.0007, 0.0299,
-                     0.0010, 0.0025, 0.0041, 0.0034, 0.0013])
+    r_pu = np.array([0.00001, 0.0174, 0.0001, 0.0052, 0.0003, 0.0010, 0.0017, 0.0022, 0.0001, 0.0016, 0.0007, 0.0299,
+                     0.0010, 0.0025, 0.0041, 0.0034, 0.0013])  # change zeros to small value for pf-calc
     # Per-unit line reactances
-    x_pu = np.array([0.1000, 0.0085, 0.0001, 0.0028, 0.0002, 0.0010, 0.0008, 0.0011, 0.0000, 0.0008, 0.0003, 0.0081,
-                     0.0010, 0.0007, 0.0013, 0.0009, 0.0004])
+    x_pu = np.array([0.1000, 0.0085, 0.0001, 0.0028, 0.0002, 0.0010, 0.0008, 0.0011, 0.00002, 0.0008, 0.0003, 0.0081,
+                     0.0010, 0.0007, 0.0013, 0.0009, 0.0004])  # change zeros to small value for pf-calc
     # Create lines
     #
     # The MATLAB data provides total line impedances in per-unit.
@@ -263,7 +263,7 @@ def _create_18_bus_grid_af(
     #
     for idx, (s, e, r, x) in enumerate(zip(start, end, r_pu, x_pu)):
         create_line_from_parameters(
-            net,
+            net_pf,
             from_bus=buses[s - 1],
             to_bus=buses[e - 1],
             length_km=1.0,
@@ -273,7 +273,7 @@ def _create_18_bus_grid_af(
             max_i_ka=1.0,
             name=f"Line {idx + 1}"
         )
-
+    net_se = copy.deepcopy(net_pf)  # create second net for state estimation
     # =========================================================================
     # 3) Loads and distributed generation
     # =========================================================================
@@ -375,45 +375,77 @@ def _create_18_bus_grid_af(
         # Generators are created as:
         #     - pv
         #     - wind
-        #
+        # For state estimation the nominal values are used
 
         # Residential load
         if p_res_pu != 0 or q_res_pu != 0:
             create_load(
-                net,
+                net_pf,
                 bus=bus,
                 p_mw=p_res_pu * base_mva,
                 q_mvar=q_res_pu * base_mva,
                 name=f"Residential Load Bus {idx + 2}",
                 type="residential"
             )
+            create_load(
+                net_se,
+                bus=bus,
+                p_mw=p_l_res[idx] * base_mva,
+                q_mvar=q_l_res[idx] * base_mva,
+                name=f"Residential Load Bus {idx + 2}",
+                type="residential"
+            )
         # Commercial load
         if p_com_pu != 0 or q_com_pu != 0:
             create_load(
-                net,
+                net_pf,
                 bus=bus,
                 p_mw=p_com_pu * base_mva,
                 q_mvar=q_com_pu * base_mva,
                 name=f"Commercial Load Bus {idx + 2}",
                 type="commercial"
             )
+            create_load(
+                net_se,
+                bus=bus,
+                p_mw=p_l_com[idx] * base_mva,
+                q_mvar=q_l_com[idx] * base_mva,
+                name=f"Commercial Load Bus {idx + 2}",
+                type="commercial"
+            )
         # Photovoltaic generation
         if p_pv_pu != 0 or q_pv_pu != 0:
             create_sgen(
-                net,
+                net_pf,
                 bus=bus,
                 p_mw=p_pv_pu * base_mva,
                 q_mvar=q_pv_pu * base_mva,
                 name=f"PV Bus {idx + 2}",
                 type="pv"
             )
+            create_sgen(
+                net_se,
+                bus=bus,
+                p_mw=p_g_pv[idx] * base_mva,
+                q_mvar=q_g_pv[idx] * base_mva,
+                name=f"PV Bus {idx + 2}",
+                type="pv"
+            )
         # Wind generation
         if p_wind_pu != 0 or q_wind_pu != 0:
             create_sgen(
-                net,
+                net_pf,
                 bus=bus,
                 p_mw=p_wind_pu * base_mva,
                 q_mvar=q_wind_pu * base_mva,
+                name=f"Wind Bus {idx + 2}",
+                type="wind"
+            )
+            create_sgen(
+                net_se,
+                bus=bus,
+                p_mw=p_g_wind[idx] * base_mva,
+                q_mvar=q_g_wind[idx] * base_mva,
                 name=f"Wind Bus {idx + 2}",
                 type="wind"
             )
@@ -430,9 +462,12 @@ def _create_18_bus_grid_af(
     #
     # BFSW is numerically more robust for distribution grids than Newton-Raphson in this case.
     #
-    runpp(net, calculate_voltage_angles=False, algorithm="bfsw")
-    _create_measurement_18_bus_grid(net=net, rv=.0, rp=.0, rq=.0)  # rv=.01, rp=.03, rq=.03
-    return net, k_dc
+    runpp(net_pf)
+    for key in net_pf.keys():
+        if key.startswith("res_"):
+            net_se[key] = net_pf[key].copy(deep=True)
+    _create_measurement_18_bus_grid(net=net_se, rv=.0, rp=.0, rq=.0)  # rv=.01, rp=.03, rq=.03
+    return net_se, k_dc
 
 
 def _create_network_with_measurements_af(net_base: pandapowerNet, measurement_interval: int = 10) -> pandapowerNet:
@@ -623,10 +658,6 @@ if __name__ == '__main__':
     ieee30_b: bool = False
     bus18: bool = True
 
-    if bus18:
-        net18, k = _create_18_bus_grid_af(seed=112)
-        test_general_function(net18)
-
     if mv_b:
         net_mv = _create_network_with_measurements_af(pn.mv_oberrhein())
         test_general_function(net_mv)
@@ -638,5 +669,9 @@ if __name__ == '__main__':
     if ieee30_b:
         net30 = _create_network_with_measurements_af(pn.case30(), 5)
         test_general_function(net30)
+
+    if bus18:
+        net18, k = _create_18_bus_grid_af(seed=112)
+        test_general_function(net18)
 
     print(f"whats up")
