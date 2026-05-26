@@ -4,6 +4,7 @@
 import copy
 import numpy as np
 import pandas as pd
+import os
 
 # imports from pandapower
 import pandapower.networks as pn
@@ -20,7 +21,7 @@ from pandapower.test.estimation.test_lav_estimation import _r
 def _create_measurement_18_bus_grid(net: pandapowerNet, rv: float = .0, rp: float = .0, rq: float = .0) -> None:
 
     # =========================================================================
-    # Bus 1: v, p, q
+    # Bus 1: v, p, q (index: 0)
     # =========================================================================
     create_measurement(
         net,
@@ -45,7 +46,7 @@ def _create_measurement_18_bus_grid(net: pandapowerNet, rv: float = .0, rp: floa
         std_dev=max(0.001, abs(0.03 * net.res_bus.q_mvar[0])),
         element=0)
     # =========================================================================
-    # Bus 4: voltage measurement
+    # Bus 4: voltage measurement (index: 3)
     # =========================================================================
     create_measurement(
         net,
@@ -56,8 +57,8 @@ def _create_measurement_18_bus_grid(net: pandapowerNet, rv: float = .0, rp: floa
         element=3
     )
     # =========================================================================
-    # Line 4 -> 5: active/reactive power flow measurement
-    # Line index = 3
+    # Line 4 -> 5 (Bus): active/reactive power flow measurement
+    # Line index = 3 ( 3 -> 4 Busindex)
     # =========================================================================
     create_measurement(
         net,
@@ -78,8 +79,8 @@ def _create_measurement_18_bus_grid(net: pandapowerNet, rv: float = .0, rp: floa
         side="from"
     )
     # =========================================================================
-    # Line 4 -> 15: active/reactive power flow measurement
-    # Line index = 13
+    # Line 4 -> 15 (Bus): active/reactive power flow measurement
+    # Line index = 13 (3 -> 14 Busindex)
     # =========================================================================
     create_measurement(
         net,
@@ -100,7 +101,7 @@ def _create_measurement_18_bus_grid(net: pandapowerNet, rv: float = .0, rp: floa
         side="from"
     )
     # =========================================================================
-    # Bus 10: voltage measurement
+    # Bus 10: voltage measurement (index: 9)
     # =========================================================================
     create_measurement(
         net,
@@ -111,8 +112,8 @@ def _create_measurement_18_bus_grid(net: pandapowerNet, rv: float = .0, rp: floa
         element=9
     )
     # =========================================================================
-    # Line 10 -> 11: active/reactive power flow measurement
-    # Line index = 9
+    # Line 10 -> 11 (Bus): active/reactive power flow measurement
+    # Line index = 9 (9 -> 10 Busindex)
     # =========================================================================
     create_measurement(
         net,
@@ -134,11 +135,15 @@ def _create_measurement_18_bus_grid(net: pandapowerNet, rv: float = .0, rp: floa
     )
 
 
-def _create_18_bus_grid_af(
+def _create_18_bus_grid_with_measurement_af(
         base_mva: float = 10.0,
         slack_v: float = 1.0,
         slack_va_degree: float = 0.0,
-        seed: int | None = None) -> tuple[pandapowerNet, dict[str, np.ndarray]]:
+        seed: int | None = None,
+        rv: float = .01,
+        rp: float = .03,
+        rq: float = .03
+) -> tuple[pandapowerNet, dict[str, np.ndarray]]:
     """
     Create the 18-bus radial distribution network from the original MATLAB implementation and run a power flow
     calculation using pandapower.
@@ -161,6 +166,12 @@ def _create_18_bus_grid_af(
 
         seed:
             Optional random seed for reproducible simulations. If ``None``, random values are generated for every call.
+
+        rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
+
+        rp: standard deviation to apply a multiplicative perturbation to quantities for active power
+
+        rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
 
     Returns:
         Return a pandapower net and a dict with the random scaling factors:
@@ -466,13 +477,17 @@ def _create_18_bus_grid_af(
     for key in net_pf.keys():
         if key.startswith("res_"):
             net_se[key] = net_pf[key].copy(deep=True)
-    _create_measurement_18_bus_grid(net=net_se, rv=.0, rp=.0, rq=.0)  # rv=.01, rp=.03, rq=.03
+    _create_measurement_18_bus_grid(net=net_se, rv=rv, rp=rp, rq=rq)  # rv=.01, rp=.03, rq=.03
     return net_se, k_dc
 
 
-def _create_network_with_measurements_af(net_base: pandapowerNet, measurement_interval: int = 10) -> pandapowerNet:
+def _create_network_with_measurements_af(
+        net_base: pandapowerNet,
+        measurement_interval: int = 1,
+        seed: int = 112
+) -> pandapowerNet:
     # 1. load mv oberrhein
-    np.random.seed(123456)
+    np.random.seed(seed)
 
     runpp(net_base)
 
@@ -508,7 +523,7 @@ def _create_network_with_measurements_af(net_base: pandapowerNet, measurement_in
     return net_base
 
 
-def test_general_function(net_base: pandapowerNet, init="flat"):
+def test_general_function(net_base: pandapowerNet, init="flat" , save_path: str = "."):
     """
        Run power flow and three different state estimations (WLS, LAV, WLAV) on different networks and return bus
        voltages, angles, and deviations. The power grid is unobservable.
@@ -518,7 +533,9 @@ def test_general_function(net_base: pandapowerNet, init="flat"):
        pandas DataFrame.
 
        Parameters:
+           net_base: A pandapower grid, where the different state estimation solver will be used.
            init: Initialization method for the state estimation (e.g. ``"flat"``).
+           save_path: path where the resolution dataframes will save.
 
        Returns:
            DataFrame with columns:
@@ -535,15 +552,14 @@ def test_general_function(net_base: pandapowerNet, init="flat"):
     net_afwls = copy.deepcopy(net_base)
     net_aflav = copy.deepcopy(net_base)
     net_afwlav = copy.deepcopy(net_base)
-    # net_wlav = copy.deepcopy(net_base)
 
 
     # 4. run estimations with soft-fail (collect errors, do not raise immediately)
     failures = []
 
     # AF-WLS
-    AFWLS = estimate(net_afwls, algorithm="af-wls", init="flat", wlav=False)
-    if not AFWLS["success"]:
+    afwls = estimate(net_afwls, algorithm="af-wls", init="flat", wlav=False)
+    if not afwls["success"]:
         failures.append("AF-WLS estimation failed")
         v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -552,8 +568,8 @@ def test_general_function(net_base: pandapowerNet, init="flat"):
         delta_afwls = net_afwls.res_bus_est.va_degree.values
 
     # LAV
-    AFLAV = estimate(net_aflav, algorithm="af-lp", wlav=False, with_ortools=False, init="flat", debug_mode=False)
-    if not AFLAV["success"]:
+    aflav = estimate(net_aflav, algorithm="af-lp", wlav=False, with_ortools=False, init="flat", debug_mode=False)
+    if not aflav["success"]:
         failures.append("LAV estimation failed")
         v_aflav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_aflav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -562,8 +578,8 @@ def test_general_function(net_base: pandapowerNet, init="flat"):
         delta_aflav = net_aflav.res_bus_est.va_degree.values
 
     # AF-WLAV
-    AFWLAV = estimate(net_afwlav, algorithm="af-lp", wlav=True, with_ortools=False, init="flat", debug_mode=False)
-    if not AFWLAV["success"]:
+    afwlav = estimate(net_afwlav, algorithm="af-lp", wlav=True, with_ortools=False, init="flat", debug_mode=False)
+    if not afwlav["success"]:
         failures.append("AF-WLAV estimation failed")
         v_afwlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
@@ -571,29 +587,19 @@ def test_general_function(net_base: pandapowerNet, init="flat"):
         v_afwlav = net_afwlav.res_bus_est.vm_pu.values
         delta_afwlav = net_afwlav.res_bus_est.va_degree.values
 
-#    # WLAV
-#    WLAV = estimate(net_wlav, algorithm="lp", wlav=True, with_ortools=False, init="flat", debug_mode=False)
-#    if not WLAV["success"]:
-#        failures.append("AF-WLAV estimation failed")
-#        v_wlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
-#        delta_wlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
-#    else:
-#        v_wlav = net_wlav.res_bus_est.vm_pu.values
-#        delta_wlav = net_wlav.res_bus_est.va_degree.values
-
     # 5. power flow results (runpp) aus net_base
     v_pf = net_base.res_bus.vm_pu.values
     delta_pf = net_base.res_bus.va_degree.values
 
     # 6. Differences Estimation - PowerFlow
-    dV_afwls = v_afwls - v_pf
-    dAngle_afwls = delta_afwls - delta_pf
+    d_v_afwls = v_afwls - v_pf
+    d_a_afwls = delta_afwls - delta_pf
 
-    dV_aflav = v_aflav - v_pf
-    dAngle_aflav = delta_aflav - delta_pf
+    d_v_aflav = v_aflav - v_pf
+    d_a_aflav = delta_aflav - delta_pf
 
-    dV_afwlav = v_afwlav - v_pf
-    dAngle_afwlav = delta_afwlav - delta_pf
+    d_v_afwlav = v_afwlav - v_pf
+    d_a_afwlav = delta_afwlav - delta_pf
 
     # 7. pack results into DataFrame
     res_total_df = pd.DataFrame(
@@ -609,46 +615,53 @@ def test_general_function(net_base: pandapowerNet, init="flat"):
         },
         index=net_base.res_bus.index,  # Bus-Index als Index
     )
+    res_total_df.to_excel(os.path.join(save_path, "total_df.xlsx"), index=False)
+
     res_diff_df = pd.DataFrame(
         {
-            "dV AF-WLS": dV_afwls,
-            "dAngle AF-WLS": dAngle_afwls,
-            "dV AF-LAV": dV_aflav,
-            "dAngle AF-LAV": dAngle_aflav,
-            "dV AF-WLAV": dV_afwlav,
-            "dAngle AF-WLAV": dAngle_afwlav,
+            "dV AF-WLS": d_v_afwls,
+            "dA AF-WLS": d_a_afwls,
+            "dV AF-LAV": d_v_aflav,
+            "dA AF-LAV": d_a_aflav,
+            "dV AF-WLAV": d_v_afwlav,
+            "dA AF-WLAV": d_a_afwlav,
         },
         index=net_base.res_bus.index,  # Bus-Index als Index
     )
+    res_diff_df.to_excel(os.path.join(save_path, "diff_df.xlsx"), index=False)
 
-    res_max_diff_df = pd.DataFrame(
+    res_diff_max_df = pd.DataFrame(
         data={
-            "AF WLS V": [np.max(np.abs(dV_afwls))],
-            "AF WLS A": [np.max(np.abs(dAngle_afwls))],
-            "AF VLA V": [np.max(np.abs(dV_aflav))],
-            "AF VLA A": [np.max(np.abs(dAngle_aflav))],
-            "AF WLAV V": [np.max(np.abs(dV_afwlav))],
-            "AF WLAV A": [np.max(np.abs(dAngle_afwlav))]
+            "AF WLS V": [np.max(np.abs(d_v_afwls))],
+            "AF WLS A": [np.max(np.abs(d_a_afwls))],
+            "AF VLA V": [np.max(np.abs(d_v_aflav))],
+            "AF VLA A": [np.max(np.abs(d_a_aflav))],
+            "AF WLAV V": [np.max(np.abs(d_v_afwlav))],
+            "AF WLAV A": [np.max(np.abs(d_a_afwlav))]
         }
     )
-    AFWLS["allocation_factors"].index = ["AF-WLS"]
-    AFWLAV["allocation_factors"].index = ["AF-WLAV"]
-    AFLAV["allocation_factors"].index = ["AF-LAV"]
+    res_diff_max_df.to_excel(os.path.join(save_path, "diff_max_df.xlsx"), index=False)
 
-    res_af_df = pd.concat([AFWLS["allocation_factors"], AFWLAV["allocation_factors"],AFLAV["allocation_factors"]])
+    # set index for resolution dataframe (allocation facotors)
+    afwls["allocation_factors"].index = ["AF-WLS"]
+    afwlav["allocation_factors"].index = ["AF-WLAV"]
+    aflav["allocation_factors"].index = ["AF-LAV"]
+
+    res_af_df = pd.concat([afwls["allocation_factors"], afwlav["allocation_factors"],aflav["allocation_factors"]])
+    res_af_df.to_excel(os.path.join(save_path, "af_df.xlsx"), index=True)
 
     # 8. Checks: apply only to successful estimates
     if "AF-WLS estimation failed" not in failures:
-        assert np.nanmax(abs(dV_afwls)) < 0.0043
-        assert np.nanmax(abs(dAngle_afwls)) < 0.2
+        assert np.nanmax(abs(d_v_afwls)) < 0.0043
+        assert np.nanmax(abs(d_a_afwls)) < 0.2
 
     if "AF-LAV estimation failed" not in failures:
-        assert np.nanmax(abs(dV_aflav)) < 0.0043
-        assert np.nanmax(abs(dAngle_aflav)) < 0.2
+        assert np.nanmax(abs(d_v_aflav)) < 0.0043
+        assert np.nanmax(abs(d_a_aflav)) < 0.2
 
     if "AF-WLAV estimation failed" not in failures:
-        assert np.nanmax(abs(dV_afwlav)) < 0.0043
-        assert np.nanmax(abs(dAngle_afwlav)) < 0.2
+        assert np.nanmax(abs(d_v_afwlav)) < 0.0043
+        assert np.nanmax(abs(d_a_afwlav)) < 0.2
 
     # 9. Evaluate the overall result at the end
     if failures:
@@ -658,6 +671,8 @@ def test_general_function(net_base: pandapowerNet, init="flat"):
 
 if __name__ == '__main__':
 
+    s_path = r"D:\forschungspunkte\state_estimation\data\18_bus"
+
     mv_b: bool = False
     ieee14_b: bool = False
     ieee30_b: bool = False
@@ -665,18 +680,18 @@ if __name__ == '__main__':
 
     if mv_b:
         net_mv = _create_network_with_measurements_af(pn.mv_oberrhein())
-        test_general_function(net_mv)
+        test_general_function(net_mv, save_path=s_path)
 
     if ieee14_b:
         net14 = _create_network_with_measurements_af(pn.case14(), 2)
-        test_general_function(net14)
+        test_general_function(net14, save_path=s_path)
 
     if ieee30_b:
         net30 = _create_network_with_measurements_af(pn.case30(), 5)
-        test_general_function(net30)
+        test_general_function(net30, save_path=s_path)
 
     if bus18:
-        net18, k = _create_18_bus_grid_af(seed=112)
-        test_general_function(net18)
+        net18, k = _create_18_bus_grid_with_measurement_af(seed=112, rv=.0, rp=.0, rq=.0) # rv=.01, rp=.03, rq=.03
+        test_general_function(net18, save_path=s_path)
 
     print(f"whats up")
