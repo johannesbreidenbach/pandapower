@@ -481,10 +481,13 @@ def _create_18_bus_grid_with_measurement_af(
     return net_se, k_dc
 
 
-def _create_network_with_measurements_af(
+def _add_measurements_af(
         net_base: pandapowerNet,
         measurement_interval: int = 1,
-        seed: int = 112
+        seed: int = 112,
+        rv: float = .01,
+        rp: float = .03,
+        rq: float = .03
 ) -> pandapowerNet:
     # 1. load mv oberrhein
     np.random.seed(seed)
@@ -500,7 +503,7 @@ def _create_network_with_measurements_af(
             net_base,
             meas_type="v",
             element_type="bus",
-            value=row.vm_pu * _r(.0),  # .01
+            value=row.vm_pu * _r(rv),
             std_dev=0.01,
             element=bus
         )
@@ -508,7 +511,7 @@ def _create_network_with_measurements_af(
             net=net_base,
             meas_type="p",
             element_type="bus",
-            value=row.p_mw * _r(.0),  # default
+            value=row.p_mw * _r(rp),
             std_dev=max(0.001, abs(0.03 * row.p_mw)),
             element=bus
         )
@@ -516,7 +519,7 @@ def _create_network_with_measurements_af(
             net=net_base,
             meas_type="q",
             element_type="bus",
-            value=row.q_mvar * _r(.0),  # default
+            value=row.q_mvar * _r(rq),
             std_dev=max(0.001, abs(0.03 * row.q_mvar)),
             element=bus
         )
@@ -679,15 +682,16 @@ if __name__ == '__main__':
     bus18: bool = True
 
     if mv_b:
-        net_mv = _create_network_with_measurements_af(pn.mv_oberrhein())
+        # rv=.01, rp=.03, rq=.03
+        net_mv = _add_measurements_af(pn.mv_oberrhein(),15, 112, .0, .0, .0)
         test_general_function(net_mv, save_path=s_path)
 
     if ieee14_b:
-        net14 = _create_network_with_measurements_af(pn.case14(), 2)
+        net14 = _add_measurements_af(pn.case14(), 2, 112, .0, .0, .0)
         test_general_function(net14, save_path=s_path)
 
     if ieee30_b:
-        net30 = _create_network_with_measurements_af(pn.case30(), 5)
+        net30 = _add_measurements_af(pn.case30(), 5, 112, .0, .0, .0)
         test_general_function(net30, save_path=s_path)
 
     if bus18:

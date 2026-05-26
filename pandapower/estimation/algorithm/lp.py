@@ -134,6 +134,7 @@ class LPAlgorithm(BaseAlgorithm):
                 if af_lp:
                     # u_i >= 0, dE free, 0 <= alpha_i <= 1
                     bounds = LPAlgorithm._create_af_bounds(n, m, len(self.eppci["clusters"]), E)
+                    # bounds = [(None, None)] * n + [(0, None)] * m  # for debugging and to compare results
                 else:
                     # u_i >= 0, dE free
                     bounds = [(None, None)] * n + [(0, None)] * m
@@ -256,9 +257,10 @@ class LPAlgorithm(BaseAlgorithm):
             Bounds list for ``scipy.optimize.linprog``.
         """
         af_bounds = []
+        eps = 1e-6
         alpha_old = E[-num_clusters:]
         for k in range(num_clusters):
-            lower_bound = -alpha_old[k]
+            lower_bound = eps - alpha_old[k]
             upper_bound = 1. - alpha_old[k]
             af_bounds.append((float(lower_bound), float(upper_bound)))
         bounds = [(None, None)] * (n - num_clusters) + af_bounds + [(0, None)] * m
