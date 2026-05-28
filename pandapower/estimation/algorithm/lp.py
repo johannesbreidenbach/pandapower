@@ -257,7 +257,7 @@ class LPAlgorithm(BaseAlgorithm):
             Bounds list for ``scipy.optimize.linprog``.
         """
         af_bounds = []
-        eps = 1e-6
+        eps = 1e-6  # to prevent small negative number something like -3.45e-27
         alpha_old = E[-num_clusters:]
         for k in range(num_clusters):
             lower_bound = eps - alpha_old[k]

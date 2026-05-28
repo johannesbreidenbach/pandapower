@@ -600,7 +600,12 @@ def _build_measurement_vectors(ppci, update_meas_only=False):
                                 )).astype(bool)
     if ppci.algorithm in ['af-wls', 'af-lp']:
         balance_eq_meas = np.zeros(ppci["rated_power_clusters"].shape[0]).astype(np.float64)
-        af_vmeas = 0.4 * np.ones(len(ppci["clusters"]))
+        # Optional pseudo-measurements (soft priors) for allocation factors. They regularize the estimation towards
+        # alpha ≈ 0.4 in weakly observable cases but are not strictly required for AF estimation. Specific value used
+        # in a grid-operator use case.
+        # af_vmeas = 0.4 * np.ones(len(ppci["clusters"]))
+
+        af_vmeas = np.array([])  # ToDo: remove cluster equation -> thus af only in P/Q-balance-equation
         z = np.concatenate(
             (z, balance_eq_meas[ppci.non_slack_bus_mask], balance_eq_meas[ppci.non_slack_bus_mask], af_vmeas))
         imag_meas = np.concatenate((imag_meas,
@@ -650,7 +655,8 @@ def _build_measurement_vectors(ppci, update_meas_only=False):
                 np.sum(np.square(ppci["rated_power_clusters"][:, 2 * num_clusters:3 * num_clusters]), axis=1))
             Q_balance_dev_std = np.sqrt(
                 np.sum(np.square(ppci["rated_power_clusters"][:, 3 * num_clusters:4 * num_clusters]), axis=1))
-            af_vmeas_dev_std = 0.15 * np.ones(len(ppci["clusters"]))
+            # af_vmeas_dev_std = 0.15 * np.ones(len(ppci["clusters"]))  # for specific use case from grid operators
+            af_vmeas_dev_std = np.array([])  # Todo: remove cluster equation same like af_vmeas
             r_cov = np.concatenate(
                 (r_cov, P_balance_dev_std[ppci.non_slack_bus_mask], Q_balance_dev_std[ppci.non_slack_bus_mask],
                  af_vmeas_dev_std))
