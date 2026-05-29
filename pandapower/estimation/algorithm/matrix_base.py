@@ -142,7 +142,7 @@ class BaseAlgebra:
 
         if self.eppci.algorithm in ["af-wls", "af-lp"]:
             p_bal_jac_E1, q_bal_jac_E1 = self._dSbus_dv(V, meas_mask["pbalance"], meas_mask["qbalance"])
-            af_vmeas_E1 = sparse((num_clusters,jac.shape[1])) 
+            af_vmeas_E1 = sparse((len(meas_mask.get("afactor")),jac.shape[1]))
 
             jac_E2 = sparse((jac.shape[0],num_clusters))
             p_bal_jac_E2 = sparse(- self.eppci["rated_power_clusters"][:,:num_clusters])

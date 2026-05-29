@@ -554,13 +554,61 @@ def _add_zero_injection(net, ppci, bus_append, zero_injection):
     return bus_append
 
 
-def _build_measurement_vectors(ppci, update_meas_only=False):
+def _prepare_af(af_init_value: float | np.ndarray, num_clusters: int) -> np.ndarray:
+    """
+    Prepare allocation factor initial values, values for condition in state estimation or values for std.
+
+    Parameters:
+        af_init_value: Scalar value or numpy array with initial values.
+        num_clusters: Number of allocation factor clusters.
+
+    Raises:
+        ValueError: If array length does not match number of clusters.
+
+    Returns:
+        Initial allocation factors with shape (num_clusters,).
+    """
+    af_init = np.asarray(af_init_value, dtype=float)
+
+    # scalar case: one value for all allocation factors
+    if af_init.ndim == 0 or af_init.size == 1:
+        return np.full(num_clusters, float(af_init))
+
+    # array case: one value per allocation factor
+    af_init = af_init.reshape(-1)
+
+    if af_init.size != num_clusters:
+        raise ValueError(
+            f"af_init_value must be a scalar or have exactly {num_clusters} values, but got {af_init.size} values."
+        )
+    return af_init
+
+
+def _build_measurement_vectors(
+        ppci,
+        update_meas_only: bool = False,
+        af_target_value: float | np.ndarray | None = None,
+        af_std_value: float | np.ndarray | None = None,
+):
     """
     Building measurement vector z, pandapower to ppci measurement mapping and covariance matrix R
-    :param ppci: generated ppci which contains the measurement columns
-    :param branch_cols: number of columns in original ppci["branch"] without measurements
-    :param bus_cols: number of columns in original ppci["bus"] without measurements
-    :return: both created vectors
+
+    Parameters:
+        ppci: generated ppci which contains the measurement columns.
+        update_meas_only: Only update z if true.
+        af_target_value:
+            Optional pseudo-measurements (soft priors) for the allocation factors. Can be a scalar, a numpy array or
+            None. Acts as a preferred value for the allocation factors (e.g. alpha ≈ 0.4) in weakly observable cases and
+            regularizes the estimation toward this value, but does not enforce it if it conflicts with the overall
+            optimization of the state estimator. Specific value 0.4 used in a grid-operator use case.
+        af_std_value:
+            Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, a numpy array or None.
+            Controls how strongly the pseudo-measurements for the allocation factors (e.g. 0.15) influence the
+            estimation: smaller values imply a stronger pull toward `af_target_value`, larger values make the
+            prior weaker. Specific value 0.15 used in a grid-operator use case.
+
+    Returns:
+        both created vectors
     """
     p_bus_not_nan = ~np.isnan(ppci["bus"][:, bus_cols + P])
     p_line_f_not_nan = ~np.isnan(ppci["branch"][:, branch_cols + P_FROM])
@@ -604,7 +652,10 @@ def _build_measurement_vectors(ppci, update_meas_only=False):
         # alpha ≈ 0.4 in weakly observable cases but are not strictly required for AF estimation. Specific value used
         # in a grid-operator use case.
         # af_vmeas = 0.4 * np.ones(len(ppci["clusters"]))
-        af_vmeas = np.array([])  # ToDo: remove cluster equation -> thus af only in P/Q-balance-equation
+        if af_target_value is not None:
+            af_vmeas = _prepare_af(af_target_value, len(ppci["clusters"]))
+        else:
+            af_vmeas = np.array([])
         z = np.concatenate(
             (z, balance_eq_meas[ppci.non_slack_bus_mask], balance_eq_meas[ppci.non_slack_bus_mask], af_vmeas))
         imag_meas = np.concatenate((imag_meas,
@@ -655,28 +706,38 @@ def _build_measurement_vectors(ppci, update_meas_only=False):
             Q_balance_dev_std = np.sqrt(
                 np.sum(np.square(ppci["rated_power_clusters"][:, 3 * num_clusters:4 * num_clusters]), axis=1))
             # af_vmeas_dev_std = 0.15 * np.ones(len(ppci["clusters"]))  # for specific use case from grid operators
-            af_vmeas_dev_std = np.array([])  # Todo: remove cluster equation same like af_vmeas
+            if af_std_value is not None:
+                af_vmeas_dev_std = _prepare_af(af_std_value, len(ppci["clusters"]))
+            else:
+                af_vmeas_dev_std = np.array([])
             r_cov = np.concatenate(
                 (r_cov, P_balance_dev_std[ppci.non_slack_bus_mask], Q_balance_dev_std[ppci.non_slack_bus_mask],
                  af_vmeas_dev_std))
             meas_mask["pbalance"] = np.flatnonzero(ppci.non_slack_bus_mask)
             meas_mask["qbalance"] = np.flatnonzero(ppci.non_slack_bus_mask)
-            meas_mask["afactor"] = np.arange(num_clusters)
+            if af_target_value is None:
+                meas_mask["afactor"] = np.empty(0, dtype=np.int64)
+            else:
+                meas_mask["afactor"] = np.arange(num_clusters)
 
         return z, pp_meas_indices, r_cov, meas_mask, idx_non_imeas
     else:
         return z
 
 
-def pp2eppci(net,
-             v_start=None,
-             delta_start=None,
-             calculate_voltage_angles: bool = True,
-             zero_injection="aux_bus",
-             algorithm: str = 'wls',
-             ppc=None,
-             eppci=None,
-             af_init_value: float | np.ndarray = .5):
+def pp2eppci(
+        net,
+        v_start=None,
+        delta_start=None,
+        calculate_voltage_angles: bool = True,
+        zero_injection="aux_bus",
+        algorithm: str = 'wls',
+        ppc=None,
+        eppci=None,
+        af_init_value: float | np.ndarray = .5,
+        af_target_value: float | np.ndarray | None = None,
+        af_std_value: float | np.ndarray | None = None,
+):
     if isinstance(eppci, ExtendedPPCI):
         eppci.algorithm = algorithm
         eppci.data = _add_measurements_to_ppci(net, eppci.data, zero_injection, algorithm)
@@ -689,11 +750,18 @@ def pp2eppci(net,
         # add measurements to ppci structure
         # Finished converting pandapower network to ppci
         ppci = _add_measurements_to_ppci(net, ppci, zero_injection, algorithm)
-        return net, ppc, ExtendedPPCI(ppci, algorithm, af_init_value)
+        return net, ppc, ExtendedPPCI(ppci, algorithm, af_init_value, af_target_value, af_std_value)
 
 
 class ExtendedPPCI(UserDict):
-    def __init__(self, ppci, algorithm: str, af_init_value: float | np.ndarray = .5):
+    def __init__(
+            self,
+            ppci,
+            algorithm: str,
+            af_init_value: float | np.ndarray = .5,
+            af_target_value: float | np.ndarray | None = None,
+            af_std_value: float | np.ndarray | None = None,
+    ):
         """Initialize ppci object with measurements."""
         self.data = ppci
         self.algorithm = algorithm
@@ -715,6 +783,9 @@ class ExtendedPPCI(UserDict):
                                       np.ones(self.non_slack_bus_mask.shape[0], dtype=bool)].ravel()
         self.delta_v_bus_selector = np.flatnonzero(self.delta_v_bus_mask)
 
+        self.af_target_value = af_target_value if algorithm in ["af-wls", "af-lp"] else None
+        self.af_std_value = af_std_value if algorithm in ["af-wls", "af-lp"] else None
+
         # Iniialize measurements 
         self._initialize_meas()
 
@@ -726,48 +797,21 @@ class ExtendedPPCI(UserDict):
         self.delta = self.delta_init.copy()
         self.E = self.E_init.copy()
         if algorithm in ["af-wls", "af-lp"]:  # set initial value for all allocation factors in E
-            af_init = self._prepare_af_init(af_init_value, len(ppci["clusters"]))
+            af_init = _prepare_af(af_init_value, len(ppci["clusters"]))
             self.E = np.concatenate((self.E, af_init))
 
     def _initialize_meas(self):
         # calculate relevant vectors from ppci measurements
-        self.z, self.pp_meas_indices, self.r_cov, self.non_nan_meas_mask, \
-            self.idx_non_imeas = \
-            _build_measurement_vectors(self, update_meas_only=False)
+        self.z, self.pp_meas_indices, self.r_cov, self.non_nan_meas_mask, self.idx_non_imeas = (
+            _build_measurement_vectors(
+                self, update_meas_only=False, af_target_value=self.af_target_value, af_std_value=self.af_std_value)
+        )
         # self.non_nan_meas_selector = np.flatnonzero(self.non_nan_meas_mask)
 
-    @staticmethod
-    def _prepare_af_init(af_init_value: float | np.ndarray, num_clusters: int) -> np.ndarray:
-        """
-        Prepare allocation factor initial values.
-
-        Parameters:
-            af_init_value: Scalar value or numpy array with initial values.
-            num_clusters: Number of allocation factor clusters.
-
-        Raises:
-            ValueError: If array length does not match number of clusters.
-
-        Returns:
-            Initial allocation factors with shape (num_clusters,).
-        """
-        af_init = np.asarray(af_init_value, dtype=float)
-
-        # scalar case: one value for all allocation factors
-        if af_init.ndim == 0 or af_init.size == 1:
-            return np.full(num_clusters, float(af_init))
-
-        # array case: one value per allocation factor
-        af_init = af_init.reshape(-1)
-
-        if af_init.size != num_clusters:
-            raise ValueError(
-                f"af_init_value must be a scalar or have exactly {num_clusters} values, but got {af_init.size} values."
-            )
-        return af_init
-
     def update_meas(self):
-        self.z = _build_measurement_vectors(self, update_meas_only=True)
+        self.z = _build_measurement_vectors(
+            self, update_meas_only=True, af_target_value=self.af_target_value, af_std_value=self.af_std_value
+        )
 
     @property
     def V(self):

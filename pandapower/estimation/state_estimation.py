@@ -29,7 +29,17 @@ ALGORITHM_MAPPING = {'wls': WLSAlgorithm,
                      'af-wls': WLSAlgorithm,
                      'af-lp': LPAlgorithm}
 Algorithms = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
-ALLOWED_OPT_VAR = {"a", "opt_method", "estimator", "linprog_method", "wlav", "with_ortools", "af_init_value"}
+ALLOWED_OPT_VAR = {
+    "a",
+    "opt_method",
+    "estimator",
+    "linprog_method",
+    "wlav",
+    "with_ortools",
+    "af_init_value",
+    "af_target_value",
+    "af_std_value"
+}
 
 
 def estimate(
@@ -102,6 +112,17 @@ def estimate(
         af_init_value (float | np.ndarray):
             Initial values for the allocation factors in E vector. One Value for all or an array for explicite. The
             value 0.5 is default.
+        af_target_value (float | np.ndarray | None):
+            Optional pseudo-measurements (soft priors) for the allocation factors. Can be a scalar, a numpy array or
+            None. Acts as a preferred value for the allocation factors (e.g. alpha ≈ 0.4) in weakly observable cases and
+            regularizes the estimation toward this value, but does not enforce it if it conflicts with the overall
+            optimization of the state estimator. Specific value 0.4 used in a grid-operator use case.
+        af_std_value (float | np.ndarray | None):
+            Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, a numpy array or None.
+            Controls how strongly the pseudo-measurements for the allocation factors (e.g. 0.15) influence the
+            estimation: smaller values imply a stronger pull toward `af_target_value`, larger values make the
+            prior weaker. Specific value 0.15 used in a grid-operator use case.
+
 
     Returns:
         bool: Was the state estimation successful?
@@ -298,10 +319,22 @@ class StateEstimation:
             set_bb_switch_impedance(self.net, bus_to_be_fused)
 
         af_init_value = opt_vars.get("af_init_value", 0.5)  # set value to default 0.5 if no values are given
-        self.net, self.ppc, self.eppci = pp2eppci(self.net, v_start=v_start, delta_start=delta_start,
+        af_target_value = opt_vars.get("af_target_value", None)
+        af_std_value = opt_vars.get("af_std_value", None)
+        if (af_target_value is None) != (af_std_value is None):
+            raise ValueError("af_target_value and af_std_value are both None or both not None.")
+        self.net, self.ppc, self.eppci = pp2eppci(self.net,
+                                                  v_start=v_start,
+                                                  delta_start=delta_start,
                                                   calculate_voltage_angles=True,
-                                                  zero_injection=zero_injection, algorithm=self.algorithm,
-                                                  ppc=self.ppc, eppci=self.eppci, af_init_value=af_init_value)
+                                                  zero_injection=zero_injection,
+                                                  algorithm=self.algorithm,
+                                                  ppc=self.ppc,
+                                                  eppci=self.eppci,
+                                                  af_init_value=af_init_value,
+                                                  af_target_value=af_target_value,
+                                                  af_std_value=af_std_value
+                                                  )
 
         # Estimate voltage magnitude and angle with the given estimator
         self.eppci = self.solver.estimate(self.eppci, debug_mode=debug_mode, **opt_vars)
