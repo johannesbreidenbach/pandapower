@@ -604,7 +604,6 @@ def _build_measurement_vectors(ppci, update_meas_only=False):
         # alpha ≈ 0.4 in weakly observable cases but are not strictly required for AF estimation. Specific value used
         # in a grid-operator use case.
         # af_vmeas = 0.4 * np.ones(len(ppci["clusters"]))
-
         af_vmeas = np.array([])  # ToDo: remove cluster equation -> thus af only in P/Q-balance-equation
         z = np.concatenate(
             (z, balance_eq_meas[ppci.non_slack_bus_mask], balance_eq_meas[ppci.non_slack_bus_mask], af_vmeas))
@@ -669,9 +668,15 @@ def _build_measurement_vectors(ppci, update_meas_only=False):
         return z
 
 
-def pp2eppci(net, v_start=None, delta_start=None,
-             calculate_voltage_angles=True, zero_injection="aux_bus",
-             algorithm='wls', ppc=None, eppci=None):
+def pp2eppci(net,
+             v_start=None,
+             delta_start=None,
+             calculate_voltage_angles: bool = True,
+             zero_injection="aux_bus",
+             algorithm: str = 'wls',
+             ppc=None,
+             eppci=None,
+             af_init_value: float | np.ndarray = .5):
     if isinstance(eppci, ExtendedPPCI):
         eppci.algorithm = algorithm
         eppci.data = _add_measurements_to_ppci(net, eppci.data, zero_injection, algorithm)
@@ -684,11 +689,11 @@ def pp2eppci(net, v_start=None, delta_start=None,
         # add measurements to ppci structure
         # Finished converting pandapower network to ppci
         ppci = _add_measurements_to_ppci(net, ppci, zero_injection, algorithm)
-        return net, ppc, ExtendedPPCI(ppci, algorithm)
+        return net, ppc, ExtendedPPCI(ppci, algorithm, af_init_value)
 
 
 class ExtendedPPCI(UserDict):
-    def __init__(self, ppci, algorithm):
+    def __init__(self, ppci, algorithm: str, af_init_value: float | np.ndarray = .5):
         """Initialize ppci object with measurements."""
         self.data = ppci
         self.algorithm = algorithm
@@ -720,8 +725,9 @@ class ExtendedPPCI(UserDict):
         self.v = self.v_init.copy()
         self.delta = self.delta_init.copy()
         self.E = self.E_init.copy()
-        if algorithm in ['af-wls', 'af-lp']:  # set initial allocation factor ToDo: why 0.5
-            self.E = np.concatenate((self.E, np.full(ppci["clusters"].shape, 0.5)))
+        if algorithm in ["af-wls", "af-lp"]:  # set initial value for all allocation factors in E
+            af_init = self._prepare_af_init(af_init_value, len(ppci["clusters"]))
+            self.E = np.concatenate((self.E, af_init))
 
     def _initialize_meas(self):
         # calculate relevant vectors from ppci measurements
@@ -729,6 +735,36 @@ class ExtendedPPCI(UserDict):
             self.idx_non_imeas = \
             _build_measurement_vectors(self, update_meas_only=False)
         # self.non_nan_meas_selector = np.flatnonzero(self.non_nan_meas_mask)
+
+    @staticmethod
+    def _prepare_af_init(af_init_value: float | np.ndarray, num_clusters: int) -> np.ndarray:
+        """
+        Prepare allocation factor initial values.
+
+        Parameters:
+            af_init_value: Scalar value or numpy array with initial values.
+            num_clusters: Number of allocation factor clusters.
+
+        Raises:
+            ValueError: If array length does not match number of clusters.
+
+        Returns:
+            Initial allocation factors with shape (num_clusters,).
+        """
+        af_init = np.asarray(af_init_value, dtype=float)
+
+        # scalar case: one value for all allocation factors
+        if af_init.ndim == 0 or af_init.size == 1:
+            return np.full(num_clusters, float(af_init))
+
+        # array case: one value per allocation factor
+        af_init = af_init.reshape(-1)
+
+        if af_init.size != num_clusters:
+            raise ValueError(
+                f"af_init_value must be a scalar or have exactly {num_clusters} values, but got {af_init.size} values."
+            )
+        return af_init
 
     def update_meas(self):
         self.z = _build_measurement_vectors(self, update_meas_only=True)

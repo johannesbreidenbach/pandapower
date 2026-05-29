@@ -561,7 +561,7 @@ def test_general_function(net_base: pandapowerNet, init="flat" , save_path: str 
     failures = []
 
     # AF-WLS
-    afwls = estimate(net_afwls, algorithm="af-wls", init="flat", wlav=False)
+    afwls = estimate(net_afwls, algorithm="af-wls", init="flat", wlav=False, af_init_value=.5)
     if not afwls["success"]:
         failures.append("AF-WLS estimation failed")
         v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)

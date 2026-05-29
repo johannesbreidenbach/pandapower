@@ -29,7 +29,7 @@ ALGORITHM_MAPPING = {'wls': WLSAlgorithm,
                      'af-wls': WLSAlgorithm,
                      'af-lp': LPAlgorithm}
 Algorithms = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
-ALLOWED_OPT_VAR = {"a", "opt_method", "estimator", "linprog_method", "wlav", "with_ortools"}
+ALLOWED_OPT_VAR = {"a", "opt_method", "estimator", "linprog_method", "wlav", "with_ortools", "af_init_value"}
 
 
 def estimate(
@@ -99,6 +99,9 @@ def estimate(
     Keyword Args:
         linprog_method (Literal["highs", "highs-ds", "highs-ipm"]): supported for algorithm='lav'
         wlav (bool): Perform LAV with weights.
+        af_init_value (float | np.ndarray):
+            Initial values for the allocation factors in E vector. One Value for all or an array for explicite. The
+            value 0.5 is default.
 
     Returns:
         bool: Was the state estimation successful?
@@ -294,10 +297,11 @@ class StateEstimation:
                 bus_to_be_fused = fuse_buses_with_bb_switch
             set_bb_switch_impedance(self.net, bus_to_be_fused)
 
+        af_init_value = opt_vars.get("af_init_value", 0.5)  # set value to default 0.5 if no values are given
         self.net, self.ppc, self.eppci = pp2eppci(self.net, v_start=v_start, delta_start=delta_start,
                                                   calculate_voltage_angles=True,
                                                   zero_injection=zero_injection, algorithm=self.algorithm,
-                                                  ppc=self.ppc, eppci=self.eppci)
+                                                  ppc=self.ppc, eppci=self.eppci, af_init_value=af_init_value)
 
         # Estimate voltage magnitude and angle with the given estimator
         self.eppci = self.solver.estimate(self.eppci, debug_mode=debug_mode, **opt_vars)
