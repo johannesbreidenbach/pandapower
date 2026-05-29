@@ -9,7 +9,7 @@ from pandapower.pypower.idx_brch import F_BUS, T_BUS
 
 from pandapower.estimation.ppc_conversion import ExtendedPPCI
 
-__all__ = ['BaseAlgebra', 'BaseAlgebraZeroInjConstraints']
+__all__ = ["BaseAlgebra", "BaseAlgebraZeroInjConstraints"]
 
 
 class BaseAlgebra:
@@ -17,10 +17,10 @@ class BaseAlgebra:
         """Object to calculate matrices required in state-estimation iterations."""
         self.eppci = eppci
 
-        self.fb = eppci['branch'][:, F_BUS].real.astype(np.int64)
-        self.tb = eppci['branch'][:, T_BUS].real.astype(np.int64)
-        self.n_bus = eppci['bus'].shape[0]
-        self.n_branch = eppci['branch'].shape[0]
+        self.fb = eppci["branch"][:, F_BUS].real.astype(np.int64)
+        self.tb = eppci["branch"][:, T_BUS].real.astype(np.int64)
+        self.n_bus = eppci["bus"].shape[0]
+        self.n_branch = eppci["branch"].shape[0]
 
         self.num_non_slack_bus = eppci.num_non_slack_bus
         self.non_slack_buses = eppci.non_slack_buses
@@ -147,7 +147,7 @@ class BaseAlgebra:
             jac_E2 = sparse((jac.shape[0],num_clusters))
             p_bal_jac_E2 = sparse(- self.eppci["rated_power_clusters"][:,:num_clusters])
             q_bal_jac_E2 = sparse(- self.eppci["rated_power_clusters"][:,num_clusters:2*num_clusters])
-            af_vmeas_E2 = eye(num_clusters, num_clusters, format='csr')
+            af_vmeas_E2 = eye(num_clusters, num_clusters, format="csr")
             p_bal_jac_E2 = p_bal_jac_E2[meas_mask["pbalance"]]
             q_bal_jac_E2 = q_bal_jac_E2[meas_mask["qbalance"]]
             af_vmeas_E2 = af_vmeas_E2[meas_mask["afactor"]]
@@ -192,7 +192,7 @@ class BaseAlgebra:
      
 
     def _dSbr_dv(self, V, side, maskP=None, maskQ=None):
-        branch = self.eppci['branch']
+        branch = self.eppci["branch"]
         f = branch[:, F_BUS].real.astype(int64)       ## list of "from" buses
         t = branch[:, T_BUS].real.astype(int64)       ## list of "to" buses
         nl = len(f)
@@ -242,7 +242,7 @@ class BaseAlgebra:
             maskVm = arange(V_shape)
 
         dvm_dth = sparse((len(maskVm), V_shape))  # Sparse zero matrix
-        dvm_dv = eye(V_shape, V_shape, format='csr')
+        dvm_dv = eye(V_shape, V_shape, format="csr")
         dvm_dv = dvm_dv[maskVm,:]
         dvm = hstack((dvm_dth, dvm_dv))
         return dvm
@@ -252,14 +252,14 @@ class BaseAlgebra:
         if maskVa is None:
             maskVa = arange(V_shape)
 
-        dva_dth = eye(V_shape, V_shape, format='csr')  # Sparse identity matrix
+        dva_dth = eye(V_shape, V_shape, format="csr")  # Sparse identity matrix
         dva_dth = dva_dth[maskVa,:]
         dva_dv = sparse((len(maskVa), V_shape))  # Sparse zero matrix
         dva = hstack((dva_dth, dva_dv))
         return dva
     
     def _dImbr_dV(self, V, side, maskI=None):
-        nl = len(self.eppci['branch'])
+        nl = len(self.eppci["branch"])
         nb = len(V)
         il = arange(nl)
         vb = arange(nb)
@@ -312,7 +312,7 @@ class BaseAlgebraZeroInjConstraints(BaseAlgebra):
         V = self.eppci.E2V(E)
         Sbus = V * np.conj(self.Ybus * V)
         c = np.r_[Sbus[p_zero_inj].real,
-                  Sbus[q_zero_inj].imag] * self.eppci['baseMVA']
+                  Sbus[q_zero_inj].imag] * self.eppci["baseMVA"]
         return c
 
     def create_cx_jacobian(self, E, p_zero_inj, q_zero_inj):

@@ -407,7 +407,7 @@ def test_general_function(init="flat"):
     # AF-WLS
     AFWLS = estimate(net_afwls, algorithm="af-wls", init="flat", wlav=False)
     if not AFWLS["success"]:
-        failures.append("AF-WLS estimation failed")
+        failures.append("af-wls estimation failed")
         v_afwls = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwls = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
     else:
@@ -417,7 +417,7 @@ def test_general_function(init="flat"):
     # LAV
     LAV = estimate(net_lav, algorithm="lp", wlav=False, with_ortools=False, init="flat", debug_mode=False)
     if not LAV["success"]:
-        failures.append("LAV estimation failed")
+        failures.append("lav estimation failed")
         v_lav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_lav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
     else:
@@ -427,7 +427,7 @@ def test_general_function(init="flat"):
     # WLAV
     WLAV = estimate(net_wlav, algorithm="lp", wlav=True, with_ortools=False, init="flat", debug_mode=False)
     if not WLAV["success"]:
-        failures.append("WLAV estimation failed")
+        failures.append("wlav estimation failed")
         v_wlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_wlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
     else:
@@ -437,7 +437,7 @@ def test_general_function(init="flat"):
     # AF-WLAV
     AFWLAV = estimate(net_afwlav, algorithm="af-lp", wlav=True, with_ortools=False, init="flat", debug_mode=False)
     if not AFWLAV["success"]:
-        failures.append("AF-WLAV estimation failed")
+        failures.append("af-wlav estimation failed")
         v_afwlav = np.full_like(net_base.res_bus.vm_pu.values, np.nan, dtype=float)
         delta_afwlav = np.full_like(net_base.res_bus.va_degree.values, np.nan, dtype=float)
     else:

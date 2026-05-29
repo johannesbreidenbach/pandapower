@@ -21,13 +21,13 @@ from pandapower.estimation.util import set_bb_switch_impedance, reset_bb_switch_
 import logging
 std_logger = logging.getLogger(__name__)
 
-ALGORITHM_MAPPING = {'wls': WLSAlgorithm,
-                     'wls_with_zero_constraint': WLSZeroInjectionConstraintsAlgorithm,
-                     'opt': OptAlgorithm,
-                     'irwls': IRWLSAlgorithm,
-                     'lp': LPAlgorithm,
-                     'af-wls': WLSAlgorithm,
-                     'af-lp': LPAlgorithm}
+ALGORITHM_MAPPING = {"wls": WLSAlgorithm,
+                     "wls_with_zero_constraint": WLSZeroInjectionConstraintsAlgorithm,
+                     "opt": OptAlgorithm,
+                     "irwls": IRWLSAlgorithm,
+                     "lp": LPAlgorithm,
+                     "af-wls": WLSAlgorithm,
+                     "af-lp": LPAlgorithm}
 Algorithms = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
 ALLOWED_OPT_VAR = {
     "a",
@@ -44,12 +44,12 @@ ALLOWED_OPT_VAR = {
 
 def estimate(
         net: pandapowerNet,
-        algorithm: Algorithms ='wls',
-        init: str = 'flat',
+        algorithm: Algorithms ="wls",
+        init: str = "flat",
         tolerance: float = 1e-6,
         maximum_iterations: int = 50,
-        zero_injection='aux_bus',
-        fuse_buses_with_bb_switch='all',
+        zero_injection="aux_bus",
+        fuse_buses_with_bb_switch="all",
         debug_mode: bool = False,
         **opt_vars
 ) -> dict[str, object]:
@@ -93,7 +93,7 @@ def estimate(
                     identified as zero-injection bus
 
         fuse_buses_with_bb_switch (str, iterable, None): Defines how buses with closed bb switches should be handled,
-            if fuse buses will only fused to one for calculation, if not fuse, an auxiliary bus and auxiliary line will
+            if fuse buses will only fuse to one for calculation, if not fuse, an auxiliary bus and auxiliary line will
             be automatically added to the network to make the buses with different p,q injection measurements
             identifiable
 
@@ -142,7 +142,7 @@ def estimate(
                        )
 
 
-def remove_bad_data(net, init='flat', tolerance=1e-6, maximum_iterations=10,
+def remove_bad_data(net, init="flat", tolerance=1e-6, maximum_iterations=10,
                     calculate_voltage_angles=True, rn_max_threshold=3.0):
     """
     Wrapper function for bad data removal.
@@ -169,7 +169,7 @@ def remove_bad_data(net, init='flat', tolerance=1e-6, maximum_iterations=10,
                                       rn_max_threshold)
 
 
-def chi2_analysis(net, init='flat', tolerance=1e-6, maximum_iterations=10,
+def chi2_analysis(net, init="flat", tolerance=1e-6, maximum_iterations=10,
                   calculate_voltage_angles=True, chi2_prob_false=0.05):
     """
     Wrapper function for the chi-squared test.
@@ -202,7 +202,7 @@ class StateEstimation:
     process.
     """
 
-    def __init__(self, net, tolerance=1e-6, maximum_iterations=50, algorithm='wls', logger=None, recycle=False):
+    def __init__(self, net, tolerance=1e-6, maximum_iterations=50, algorithm="wls", logger=None, recycle=False):
         self.logger = logger
         if self.logger is None:
             self.logger = std_logger
@@ -220,21 +220,21 @@ class StateEstimation:
         self.bad_data_present = None
 
     @overload
-    def estimate(self, v_start='flat', delta_start='flat', zero_injection=None,
-                 fuse_buses_with_bb_switch='all', debug_mode=False, **opt_vars):
+    def estimate(self, v_start="flat", delta_start="flat", zero_injection=None,
+                 fuse_buses_with_bb_switch="all", debug_mode=False, **opt_vars):
         ...
 
     @overload
     @deprecated("algorithm should be set via init. Use of algorithm key is deprecated.")
-    def estimate(self, v_start='flat', delta_start='flat', zero_injection=None,
-                 fuse_buses_with_bb_switch='all', algorithm='wls', debug_mode=False, **opt_vars):
+    def estimate(self, v_start="flat", delta_start="flat", zero_injection=None,
+                 fuse_buses_with_bb_switch="all", algorithm="wls", debug_mode=False, **opt_vars):
         ...
 
     def estimate(self,
-                 v_start='flat',
-                 delta_start='flat',
+                 v_start="flat",
+                 delta_start="flat",
                  zero_injection=None,
-                 fuse_buses_with_bb_switch='all',
+                 fuse_buses_with_bb_switch="all",
                  debug_mode=False,
                  **opt_vars
                  ) -> dict[str, object]:
@@ -311,10 +311,10 @@ class StateEstimation:
         # change the configuration of the pp net to avoid auto fusing of buses connected
         # through bb switch with elements on each bus if this feature enabled
         bus_to_be_fused = None
-        if fuse_buses_with_bb_switch != 'all' and not self.net.switch.empty:
+        if fuse_buses_with_bb_switch != "all" and not self.net.switch.empty:
             if isinstance(fuse_buses_with_bb_switch, str):
                 raise UserWarning("fuse_buses_with_bb_switch parameter is not correctly initialized")
-            elif hasattr(fuse_buses_with_bb_switch, '__iter__'):
+            elif hasattr(fuse_buses_with_bb_switch, "__iter__"):
                 bus_to_be_fused = fuse_buses_with_bb_switch
             set_bb_switch_impedance(self.net, bus_to_be_fused)
 
@@ -347,7 +347,7 @@ class StateEstimation:
             self.logger.warning("Estimation failed! Pandapower network failed to update!")
 
         # clear the aux elements and calculation results created for the substitution of bb switches
-        if fuse_buses_with_bb_switch != 'all' and not self.net.switch.empty:
+        if fuse_buses_with_bb_switch != "all" and not self.net.switch.empty:
             reset_bb_switch_impedance(self.net)
 
         # if recycle is not wished, reset ppc, ppci

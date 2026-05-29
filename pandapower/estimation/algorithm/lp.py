@@ -54,7 +54,7 @@ class LPAlgorithm(BaseAlgorithm):
             self,
             eppci: ExtendedPPCI,
             debug_mode=False,
-            linprog_method: LinprogMethod = 'highs',
+            linprog_method: LinprogMethod = "highs",
             wlav: bool = False,
             with_ortools: bool = True,
             **kwargs
@@ -166,21 +166,21 @@ class LPAlgorithm(BaseAlgorithm):
 
                 if debug_mode:
                     self.obj_func = obj_value
-                    self.logger.debug(f'Current delta_x: {current_error:.7f}')
-                    self.logger.debug(f'Current LAV objective value: {obj_value:.7f}')
+                    self.logger.debug(f"Current delta_x: {current_error:.7f}")
+                    self.logger.debug(f"Current LAV objective value: {obj_value:.7f}")
 
                 cur_it += 1
 
             except Exception as err:
-                self.logger.error(f'A problem appeared while running LAV estimation: {err}')
+                self.logger.error(f"A problem appeared while running LAV estimation: {err}")
                 return False
 
         self.check_result(current_error, cur_it)  # set self.successful to true if se works
         self.iterations = cur_it
 
         if debug_mode:
-            print(f'number of required iterations: {cur_it} of {self.max_iterations}')
-            print(f'current_error = {current_error}, threshold = {self.tolerance}')
+            print(f"number of required iterations: {cur_it} of {self.max_iterations}")
+            print(f"current_error = {current_error}, threshold = {self.tolerance}")
 
         if self.successful:
             self.H = np.asarray(sem.create_hx_jacobian(E))  # ToDo: E or eppci.E
@@ -281,7 +281,7 @@ class LPAlgorithm(BaseAlgorithm):
         Returns:
             Dense NumPy array. Vector-like inputs are flattened to shape ``(n,)``.
         """
-        arr = x.toarray() if hasattr(x, 'toarray') else np.asarray(x)
+        arr = x.toarray() if hasattr(x, "toarray") else np.asarray(x)
         arr = np.asarray(arr, dtype=np.float64)
 
         if arr.ndim == 0:
