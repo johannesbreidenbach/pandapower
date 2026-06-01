@@ -5,6 +5,7 @@ import copy
 import numpy as np
 import pandas as pd
 import os
+import pickle
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -13,7 +14,7 @@ from dotenv import load_dotenv
 
 # imports from pandapower
 import pandapower.networks as pn
-from pandapower import to_json
+from pandapower import to_json, from_json
 from pandapower.run import runpp
 from pandapower.estimation import estimate
 from pandapower.create import (create_measurement, create_empty_network, create_bus, create_ext_grid,
@@ -759,96 +760,249 @@ def evaluation_af(path: str = ".") -> None:
 
     print(f"saved html to: {html_file}")
 
-    # af_wls = estimate(net_af_wls, algorithm="af-wls", wlav=False)  # , af_target_value=.4, af_std_value=.15
-    # if not af_wls["success"]:
-    #     failures.append("AF-WLS estimation failed")
-    #     v_af_wls = np.full_like(net_af_wls.res_bus.vm_pu.values, np.nan, dtype=float)
-    #     delta_af_wls = np.full_like(net_af_wls.res_bus.va_degree.values, np.nan, dtype=float)
-    # else:
-    #     v_af_wls = net_af_wls.res_bus_est.vm_pu.values
-    #     delta_af_wls = net_af_wls.res_bus_est.va_degree.values
-    #
-    # # LAV
-    # af_lav = estimate(net_af_lav, algorithm="af-lp", wlav=False, with_ortools=False)
-    # if not af_lav["success"]:
-    #     failures.append("LAV estimation failed")
-    #     v_af_lav = np.full_like(net_af_lav.res_bus.vm_pu.values, np.nan, dtype=float)
-    #     delta_af_lav = np.full_like(net_af_lav.res_bus.va_degree.values, np.nan, dtype=float)
-    # else:
-    #     v_af_lav = net_af_lav.res_bus_est.vm_pu.values
-    #     delta_af_lav = net_af_lav.res_bus_est.va_degree.values
-    #
-    # # AF-WLAV
-    # af_wlav = estimate(net_af_wlav, algorithm="af-lp", wlav=True, with_ortools=False)
-    # if not af_wlav["success"]:
-    #     failures.append("AF-WLAV estimation failed")
-    #     v_af_wlav = np.full_like(net_af_wlav.res_bus.vm_pu.values, np.nan, dtype=float)
-    #     delta_af_wlav = np.full_like(net_af_wlav.res_bus.va_degree.values, np.nan, dtype=float)
-    # else:
-    #     v_af_wlav = net_af_wlav.res_bus_est.vm_pu.values
-    #     delta_af_wlav = net_af_wlav.res_bus_est.va_degree.values
-    # 5. power flow results (runpp) aus net_base
-    # v_pf = net_base.res_bus.vm_pu.values
-    # delta_pf = net_base.res_bus.va_degree.values
-    #
-    # # 6. Differences Estimation - PowerFlow
-    # d_v_af_wls = v_af_wls - v_pf
-    # d_a_af_wls = delta_af_wls - delta_pf
-    #
-    # d_v_af_lav = v_af_lav - v_pf
-    # d_a_af_lav = delta_af_lav - delta_pf
-    #
-    # d_v_af_wlav = v_af_wlav - v_pf
-    # d_a_af_wlav = delta_af_wlav - delta_pf
-    #
-    # # 7. pack results into DataFrame
-    # res_total_df = pd.DataFrame(
-    #     {
-    #         "V PF": v_pf,
-    #         "angle PF": delta_pf,
-    #         "V AF-WLS": v_af_wls,
-    #         "angle AF-WLS": delta_af_wls,
-    #         "V AF-LAV": v_af_lav,
-    #         "angle AF-LAV": delta_af_lav,
-    #         "V AF-WLAV": v_af_wlav,
-    #         "angle AF-WLAV": delta_af_wlav,
-    #     },
-    #     index=net_base.res_bus.index,  # Bus-Index als Index
-    # )
-    # res_total_df.to_excel(os.path.join(save_path, "total_df.xlsx"), index=False)
-    #
-    # res_diff_df = pd.DataFrame(
-    #     {
-    #         "dV AF-WLS": d_v_af_wls,
-    #         "dA AF-WLS": d_a_af_wls,
-    #         "dV AF-LAV": d_v_af_lav,
-    #         "dA AF-LAV": d_a_af_lav,
-    #         "dV AF-WLAV": d_v_af_wlav,
-    #         "dA AF-WLAV": d_a_af_wlav,
-    #     },
-    #     index=net_base.res_bus.index,  # Bus-Index als Index
-    # )
-    # res_diff_df.to_excel(os.path.join(save_path, "diff_df.xlsx"), index=False)
-    #
-    # res_diff_max_df = pd.DataFrame(
-    #     data={
-    #         "AF WLS V": [np.max(np.abs(d_v_af_wls))],
-    #         "AF WLS A": [np.max(np.abs(d_a_af_wls))],
-    #         "AF VLA V": [np.max(np.abs(d_v_af_lav))],
-    #         "AF VLA A": [np.max(np.abs(d_a_af_lav))],
-    #         "AF WLAV V": [np.max(np.abs(d_v_af_wlav))],
-    #         "AF WLAV A": [np.max(np.abs(d_a_af_wlav))]
-    #     }
-    # )
-    # res_diff_max_df.to_excel(os.path.join(save_path, "diff_max_df.xlsx"), index=False)
-    #
-    # # set index for resolution dataframe (allocation factors)
-    # af_wls["allocation_factors"].index = ["AF-WLS"]
-    # af_wlav["allocation_factors"].index = ["AF-WLAV"]
-    # af_lav["allocation_factors"].index = ["AF-LAV"]
-    #
-    # res_af_df = pd.concat([af_wls["allocation_factors"], af_wlav["allocation_factors"], af_lav["allocation_factors"]])
-    # res_af_df.to_excel(os.path.join(save_path, "af_df.xlsx"), index=True)
+
+def load_net_cached(json_file: str) -> pandapowerNet:
+
+    cache_file = json_file.replace(".json", ".pkl")
+
+    if os.path.exists(cache_file):
+        with open(cache_file, "rb") as f:
+            return pickle.load(f)
+
+    net = from_json(json_file)
+
+    with open(cache_file, "wb") as f:
+        pickle.dump(net, f)
+
+    return net
+
+
+def build_eval_dataframe(result_dict, variable="vm_pu"):
+    return pd.DataFrame({iteration: df[variable].astype(float) for iteration, df in result_dict.items()}).T.sort_index()
+
+
+def evaluation_vp(path: str = ".") -> None:
+
+    html_vm_file = os.path.join(path, "voltage_magnitude.html")
+    html_lp_file = os.path.join(path, "line_power.html")
+    html_ve_file = os.path.join(path, "voltage_uncertainty.html")
+    if os.path.exists(html_vm_file) and os.path.exists(html_lp_file) and os.path.exists(html_ve_file):
+        print(f"html files already exists: {html_vm_file, html_lp_file, html_ve_file}")
+        return
+    # -------------------------------------------------------------------------
+    # Read in failures
+    # -------------------------------------------------------------------------
+    failures = pd.read_csv(
+        os.path.join(path, "failures.txt"),
+        header=None,
+        names=["solver", "iteration", "status"],
+        skipinitialspace=True,
+        dtype={"solver": str, "iteration": str, "status": str}
+    )
+    failures["iteration"] = failures["iteration"].astype(int)
+    failure_set = set(zip(failures["solver"], failures["iteration"]))
+    # -------------------------------------------------------------------------
+    # Read in data from json
+    # -------------------------------------------------------------------------
+    solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
+    # solver_file_ls = ["af_wls", "af_wlav", "af_lav"]
+
+    wls_ls = sorted(
+        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_wls_") and f.endswith(".json")
+    )
+    wlav_ls = sorted(
+        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_wlav_") and f.endswith(".json")
+    )
+    lav_ls = sorted(
+        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_lav_") and f.endswith(".json")
+    )
+
+    json_files_ls = [wls_ls, wlav_ls, lav_ls]
+
+    res_bus_dc = {solver: {} for solver in solver_ls}
+    res_bus_est_dc = {solver: {} for solver in solver_ls}
+
+    res_line_dc = {solver: {} for solver in solver_ls}
+    res_line_est_dc = {solver: {} for solver in solver_ls}
+
+    for i in range(len(wls_ls)):
+        for j in range(len(solver_ls)):
+
+            if (solver_ls[j], i) in failure_set:
+                print(f"skip failure: solver={solver_ls[j]}, iteration={i}")
+                continue
+            # net_ij = load_net_cached(json_files_ls[j][i])  # faster for debugging
+            net_ij = from_json(json_files_ls[j][i])
+
+            if not hasattr(net_ij, "res_bus"):
+                print(f"missing res_bus: solver={solver_ls[j]}, iteration={i}")
+                continue
+
+            if not hasattr(net_ij, "res_bus_est"):
+                print(f"missing res_bus_est: solver={solver_ls[j]}, iteration={i}")
+                continue
+
+            res_bus_dc[solver_ls[j]][i] = net_ij.res_bus.copy()
+            res_bus_est_dc[solver_ls[j]][i] = net_ij.res_bus_est.copy()
+
+            res_line_dc[solver_ls[j]][i] = net_ij.res_line.copy()
+            res_line_est_dc[solver_ls[j]][i] = net_ij.res_line_est.copy()
+        print(f"{i} finished")
+
+    # -------------------------------------------------------------------------
+    # Plot Figures separately
+    # -------------------------------------------------------------------------
+    fig_vm = go.Figure()
+    fig_lp = go.Figure()
+    fig_ve = go.Figure()
+
+    k = 3.0  # expanded uncertainty factor
+
+    for solver in solver_ls:
+        # ---------------------------------------------------------------------
+        # Voltage magnitude
+        # ---------------------------------------------------------------------
+        # DataFrame for bus
+        vm_true = build_eval_dataframe(res_bus_dc[solver], "vm_pu").astype(float)
+        vm_est = build_eval_dataframe(res_bus_est_dc[solver], "vm_pu").astype(float)
+
+        # calc mean for every bus separate
+        vm_true_mean = vm_true.mean(axis=0)
+        vm_est_mean = vm_est.mean(axis=0)
+
+        # clac RMSE pro bus
+        vm_error = vm_est - vm_true
+        vm_rmse = np.sqrt((vm_error ** 2).mean(axis=0))
+        # clac expanded uncertainty
+        vm_U = k * vm_rmse
+
+        x_bus = np.arange(len(vm_est_mean))
+
+        # plot uncertainty band
+        fig_vm.add_trace(
+            go.Scatter(
+                x=np.concatenate([x_bus, x_bus[::-1]]),
+                y=np.concatenate([
+                    (vm_est_mean + vm_U).to_numpy(),
+                    (vm_est_mean - vm_U).to_numpy()[::-1]
+                ]),
+                fill="toself",
+                line=dict(width=0),
+                opacity=0.2,
+                name=f"{solver} uncertainty"
+            )
+        )
+
+        fig_vm.add_trace(
+            go.Scatter(
+                x=x_bus,
+                y=vm_est_mean.to_numpy(),
+                mode="lines",
+                name=f"{solver} estimated V"
+            )
+        )
+
+        fig_vm.add_trace(
+            go.Scatter(
+                x=x_bus,
+                y=vm_true_mean.to_numpy(),
+                mode="lines",
+                line=dict(dash="dash"),
+                name=f"{solver} true V"
+            )
+        )
+
+        # ---------------------------------------------------------------------
+        # Branch active power
+        # ---------------------------------------------------------------------
+        p_true = build_eval_dataframe(res_line_dc[solver], "p_from_mw").astype(float)
+        p_est = build_eval_dataframe(res_line_est_dc[solver], "p_from_mw").astype(float)
+
+        p_true_mean = p_true.mean(axis=0)
+        p_est_mean = p_est.mean(axis=0)
+
+        p_error = p_est - p_true
+        p_rmse = np.sqrt((p_error ** 2).mean(axis=0))
+        p_U = k * p_rmse
+
+        x_line = np.arange(len(p_est_mean))
+
+        fig_lp.add_trace(
+            go.Scatter(
+                x=np.concatenate([x_line, x_line[::-1]]),
+                y=np.concatenate([
+                    (p_est_mean + p_U).to_numpy(),
+                    (p_est_mean - p_U).to_numpy()[::-1]
+                ]),
+                fill="toself",
+                line=dict(width=0),
+                opacity=0.2,
+                name=f"{solver} uncertainty"
+            )
+        )
+
+        fig_lp.add_trace(
+            go.Scatter(
+                x=x_line,
+                y=p_est_mean.to_numpy(),
+                mode="lines",
+                name=f"{solver} estimated P"
+            )
+        )
+
+        fig_lp.add_trace(
+            go.Scatter(
+                x=x_line,
+                y=p_true_mean.to_numpy(),
+                mode="lines",
+                line=dict(dash="dash"),
+                name=f"{solver} true P"
+            )
+        )
+
+        # ---------------------------------------------------------------------
+        # Voltage uncertainty
+        # ---------------------------------------------------------------------
+        fig_ve.add_trace(
+            go.Scatter(
+                x=x_bus,
+                y=(100 * vm_U).to_numpy(),
+                mode="lines",
+                name=f"{solver} V uncertainty [%]"
+            )
+        )
+
+    fig_vm.update_layout(
+        title="Voltage Magnitude Estimation",
+        xaxis_title="Bus",
+        yaxis_title="Voltage magnitude [p.u.]",
+        height=700,
+        width=1400
+    )
+
+    fig_lp.update_layout(
+        title="Branch Active Power Estimation",
+        xaxis_title="Branch",
+        yaxis_title="Active power [MW]",
+        height=700,
+        width=1400
+    )
+
+    fig_ve.update_layout(
+        title="Voltage Magnitude Expanded Uncertainty",
+        xaxis_title="Bus",
+        yaxis_title="Expanded uncertainty [%]",
+        height=700,
+        width=1400
+    )
+
+    fig_vm.write_html(html_vm_file)
+    fig_lp.write_html(html_lp_file)
+    fig_ve.write_html(html_ve_file)
+
+    print(f"saved html to: {html_vm_file}")
+    print(f"saved html to: {html_lp_file}")
+    print(f"saved html to: {html_ve_file}")
 
 
 if __name__ == "__main__":
@@ -872,8 +1026,11 @@ if __name__ == "__main__":
 
     if bus18:
         s_path = str(os.getenv("SAVE_PATH"))
+        # t_path = str(os.getenv("TEST_PATH"))
+        # t_10_path = str(os.getenv("TEST_10"))
+        # ToDo: write comments and doc strings
         create_random_grid_random_estimation(s_path, 1000, 112, .01, .01, .01)
         evaluation_af(s_path)
+        evaluation_vp(s_path)
 
-
-    print(f"whats up")
+    print(f"you shall not pass")

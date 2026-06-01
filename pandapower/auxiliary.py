@@ -1550,6 +1550,9 @@ def _add_options(net: pandapowerNet, options: dict[str, Any]) -> None:
     net._options.update(options)
 
 
+# ToDo: _add_se_options()
+
+
 def get_vsc_stacked_names(elements: NDArray):
     # naming scheme is stacked_0+, stacked_0-, stacked_1+, stacked_1-, ...
     return np.char.add(np.char.add('stacked_', np.repeat(elements, 2).astype(str)), np.tile(['+', '-'], len(elements)))
