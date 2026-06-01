@@ -6,6 +6,11 @@ import numpy as np
 import pandas as pd
 import os
 
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+from dotenv import load_dotenv
+
 # imports from pandapower
 import pandapower.networks as pn
 from pandapower import to_json
@@ -42,24 +47,24 @@ def _add_measurements_af(
             meas_type="v",
             element_type="bus",
             value=row.vm_pu * _r(rv),
-            std_dev=0.01,
-            element=bus
+            std_dev=max(.001, abs(rv * row.vm_pu)),
+            element=int(bus)
         )
         create_measurement(
             net=net_base,
             meas_type="p",
             element_type="bus",
             value=row.p_mw * _r(rp),
-            std_dev=max(0.001, abs(0.03 * row.p_mw)),
-            element=bus
+            std_dev=max(.001, abs(rp * row.p_mw)),
+            element=int(bus)
         )
         create_measurement(
             net=net_base,
             meas_type="q",
             element_type="bus",
             value=row.q_mvar * _r(rq),
-            std_dev=max(0.001, abs(0.03 * row.q_mvar)),
-            element=bus
+            std_dev=max(.001, abs(rq * row.q_mvar)),
+            element=int(bus)
         )
     return net_base
 
@@ -89,7 +94,7 @@ def _create_measurement_18_bus_grid(
         meas_type="v",
         element_type="bus",
         value=net.res_bus.vm_pu[0] * _r(rv),
-        std_dev=0.01,
+        std_dev=max(.001, abs(rv * net.res_bus.vm_pu[0])),
         element=0
     )
     create_measurement(
@@ -97,15 +102,16 @@ def _create_measurement_18_bus_grid(
         meas_type="p",
         element_type="bus",
         value=net.res_bus.p_mw[0] * _r(rp),
-        std_dev=max(0.001, abs(0.03 * net.res_bus.p_mw[0])),
+        std_dev=max(.001, abs(rp * net.res_bus.p_mw[0])),
         element=0)
     create_measurement(
         net,
         meas_type="q",
         element_type="bus",
         value=net.res_bus.q_mvar[0] * _r(rq),
-        std_dev=max(0.001, abs(0.03 * net.res_bus.q_mvar[0])),
-        element=0)
+        std_dev=max(.001, abs(rq * net.res_bus.q_mvar[0])),
+        element=0
+    )
     # =========================================================================
     # Bus 4: voltage measurement (index: 3)
     # =========================================================================
@@ -114,7 +120,7 @@ def _create_measurement_18_bus_grid(
         meas_type="v",
         element_type="bus",
         value=net.res_bus.vm_pu[3] * _r(rv),
-        std_dev=0.01,
+        std_dev=max(.001, abs(rv * net.res_bus.vm_pu[3])),
         element=3
     )
     # =========================================================================
@@ -126,7 +132,7 @@ def _create_measurement_18_bus_grid(
         meas_type="p",
         element_type="line",
         value=net.res_line.p_from_mw[3] * _r(rp),
-        std_dev=max(0.001, abs(0.03 * net.res_line.p_from_mw[3])),
+        std_dev=max(.001, abs(rp * net.res_line.p_from_mw[3])),
         element=3,
         side="from"
     )
@@ -135,7 +141,7 @@ def _create_measurement_18_bus_grid(
         meas_type="q",
         element_type="line",
         value=net.res_line.q_from_mvar[3] * _r(rq),
-        std_dev=max(0.001, abs(0.03 * net.res_line.q_from_mvar[3])),
+        std_dev=max(.001, abs(rq * net.res_line.q_from_mvar[3])),
         element=3,
         side="from"
     )
@@ -148,7 +154,7 @@ def _create_measurement_18_bus_grid(
         meas_type="p",
         element_type="line",
         value=net.res_line.p_from_mw[13] * _r(rp),
-        std_dev=max(0.001, abs(0.03 * net.res_line.p_from_mw[13])),
+        std_dev=max(.001, abs(rp * net.res_line.p_from_mw[13])),
         element=13,
         side="from"
     )
@@ -157,7 +163,7 @@ def _create_measurement_18_bus_grid(
         meas_type="q",
         element_type="line",
         value=net.res_line.q_from_mvar[13] * _r(rq),
-        std_dev=max(0.001, abs(0.03 * net.res_line.q_from_mvar[13])),
+        std_dev=max(.001, abs(rq * net.res_line.q_from_mvar[13])),
         element=13,
         side="from"
     )
@@ -169,7 +175,7 @@ def _create_measurement_18_bus_grid(
         meas_type="v",
         element_type="bus",
         value=net.res_bus.vm_pu[9] * _r(rv),
-        std_dev=0.01,
+        std_dev=max(.001, abs(rv * net.res_bus.vm_pu[9])),
         element=9
     )
     # =========================================================================
@@ -181,7 +187,7 @@ def _create_measurement_18_bus_grid(
         meas_type="p",
         element_type="line",
         value=net.res_line.p_from_mw[9] * _r(rp),
-        std_dev=max(0.001, abs(0.03 * net.res_line.p_from_mw[9])),
+        std_dev=max(.001, abs(rp * net.res_line.p_from_mw[9])),
         element=9,
         side="from"
     )
@@ -190,7 +196,7 @@ def _create_measurement_18_bus_grid(
         meas_type="q",
         element_type="line",
         value=net.res_line.q_from_mvar[9] * _r(rq),
-        std_dev=max(0.001, abs(0.03 * net.res_line.q_from_mvar[9])),
+        std_dev=max(.001, abs(rq * net.res_line.q_from_mvar[9])),
         element=9,
         side="from"
     )
@@ -592,7 +598,14 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
         res_af_df.to_csv(res_af_file, index=True)
 
 
-def create_random_grid_random_estimation(path: str = ".", itr: int = 1000, seed: int = 112) -> None:
+def create_random_grid_random_estimation(
+        path: str = ".",
+        itr: int = 1000,
+        seed: int = 112,
+        rv: float = .01,
+        rp: float = .03,
+        rq: float = .03
+) -> None:
     """
     Every iteration will compute random value for load and gen for the powerflow calculation. In addition, also for the
     measurement for state estimation.
@@ -601,16 +614,18 @@ def create_random_grid_random_estimation(path: str = ".", itr: int = 1000, seed:
         path: Place where grid and allocation factors will be saved.
         itr: Number of iterations.
         seed: Optional random seed for reproducible simulations.If ``None``, random values are generated for every call.
-
+        rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
+        rp: standard deviation to apply a multiplicative perturbation to quantities for active power
+        rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
     Returns: None
     """
     # seed:
-    np.random.seed(112)
+    np.random.seed(seed)
     failures: list = []
     for i in range(itr):
         name_str = f"{i:03d}"
         net18, k = _create_18_bus_grid()
-        _create_measurement_18_bus_grid(net=net18)  # , rv=0, rp=0, rq=0
+        _create_measurement_18_bus_grid(net=net18, rv=rv, rp=rp, rq=rq)  #
         calc_different_se(net18, failures, name_str, path)
 
     if not failures:
@@ -622,17 +637,127 @@ def create_random_grid_random_estimation(path: str = ".", itr: int = 1000, seed:
                 f.write(failure + "\n")
         raise UserWarning(f"Failures exist: {failures}")
 
-def evaluation_18_bus_gird(path: str = ".") -> None:
 
+def evaluation_af(path: str = ".") -> None:
 
+    html_file = os.path.join(path, "allocation_factor_plots.html")
+    if os.path.exists(html_file):
+        print(f"html file already exists: {html_file}")
+        return
+    # -------------------------------------------------------------------------
+    # Read in failures
+    # -------------------------------------------------------------------------
     failures = pd.read_csv(
         os.path.join(path, "failures.txt"),
         header=None,
-        names=["algorithm", "iteration", "status"],
+        names=["solver", "iteration", "status"],
         skipinitialspace=True,
-        dtype={"algorithm": str, "iteration": str, "status": str}
+        dtype={"solver": str, "iteration": str, "status": str}
     )
     failures["iteration"] = failures["iteration"].astype(int)
+    failure_set = set(zip(failures["solver"], failures["iteration"]))
+    # -------------------------------------------------------------------------
+    # Read in CSV file
+    # -------------------------------------------------------------------------
+    csv_files = sorted(
+        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_df_") and f.endswith(".csv")
+    )
+    if not csv_files:
+        raise FileNotFoundError("No af_df_*.csv files found")
+
+    solver_ls = pd.read_csv(csv_files[0], index_col=0).index.tolist()
+    af_ls = pd.read_csv(csv_files[0], index_col=0).columns.tolist()
+    # -------------------------------------------------------------------------
+    # collect data
+    # -------------------------------------------------------------------------
+    af_total_dc = {solver: pd.DataFrame(columns=af_ls) for solver in solver_ls}
+
+    for i in range(len(csv_files)):
+        if not os.path.exists(csv_files[i]):
+            print(f"Fehlt: {csv_files[i]}")
+            continue
+
+        df = pd.read_csv(csv_files[i], index_col=0)
+        for solver in solver_ls:
+
+            if (solver, i) in failure_set:
+                continue
+            af_total_dc[solver].loc[i, af_ls] = df.loc[solver]
+    # -------------------------------------------------------------------------
+    # Plot erstellen
+    # -------------------------------------------------------------------------
+    rows_box = len(solver_ls)
+    rows_hist = len(solver_ls)
+    total_rows = rows_box + rows_hist
+
+    subplot_titles = []
+
+    for solver in solver_ls:
+        for af in af_ls:
+            subplot_titles.append(f"Boxplot<br>{solver}<br>{af}")
+
+    for solver in solver_ls:
+        for af in af_ls:
+            subplot_titles.append(f"Histogram<br>{solver}<br>{af}")
+
+    fig = make_subplots(
+        rows=total_rows,
+        cols=len(af_ls),
+        subplot_titles=subplot_titles,
+        vertical_spacing=0.05
+    )
+    # -------------------------------------------------------------------------
+    # Boxplots
+    # -------------------------------------------------------------------------
+    for row, solver in enumerate(solver_ls, start=1):
+
+        df_solver = af_total_dc[solver]
+
+        for col, af in enumerate(af_ls, start=1):
+            fig.add_trace(
+                go.Box(
+                    y=df_solver[af].dropna(),
+                    name=f"{solver}-{af}",
+                    boxmean=True,
+                    showlegend=False
+                ),
+                row=row,
+                col=col
+            )
+
+    # -------------------------------------------------------------------------
+    # Histogramme
+    # -------------------------------------------------------------------------
+    for row_offset, solver in enumerate(solver_ls, start=1):
+
+        df_solver = af_total_dc[solver]
+        row = rows_box + row_offset
+
+        for col, af in enumerate(af_ls, start=1):
+            fig.add_trace(
+                go.Histogram(
+                    x=df_solver[af].dropna(),
+                    nbinsx=30,  # number of bars -> value range
+                    name=f"{solver}-{af}",
+                    showlegend=False
+                ),
+                row=row,
+                col=col
+            )
+
+    # -------------------------------------------------------------------------
+    # Layout
+    # -------------------------------------------------------------------------
+    fig.update_layout(
+        title="Allocation Factors - Boxplots and Histograms",
+        height=2500,
+        width=1600,
+        margin=dict(t=200)
+    )
+
+    fig.write_html(html_file)
+
+    print(f"saved html to: {html_file}")
 
     # af_wls = estimate(net_af_wls, algorithm="af-wls", wlav=False)  # , af_target_value=.4, af_std_value=.15
     # if not af_wls["success"]:
@@ -724,10 +849,11 @@ def evaluation_18_bus_gird(path: str = ".") -> None:
     #
     # res_af_df = pd.concat([af_wls["allocation_factors"], af_wlav["allocation_factors"], af_lav["allocation_factors"]])
     # res_af_df.to_excel(os.path.join(save_path, "af_df.xlsx"), index=True)
-    print(f"evaluation_18_bus_gird")
 
 
 if __name__ == "__main__":
+
+    load_dotenv()
 
     mv_b: bool = False
     ieee14_b: bool = False
@@ -745,9 +871,9 @@ if __name__ == "__main__":
         net30 = _add_measurements_af(pn.case30(), 5, 112, .0, .0, .0)
 
     if bus18:
-        s_path = r"D:\forschungspunkte\state_estimation\data\18_bus\data"  # ToDo: has to remove after testing
-        create_random_grid_random_estimation(s_path, 100)
-        evaluation_18_bus_gird(s_path)
+        s_path = str(os.getenv("SAVE_PATH"))
+        create_random_grid_random_estimation(s_path, 1000, 112, .01, .01, .01)
+        evaluation_af(s_path)
 
 
     print(f"whats up")

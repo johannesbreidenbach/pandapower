@@ -34,3 +34,4 @@ pandapower/test/buffer_file.json
 sonar-project.properties
 .scannerwork/
 uv.lock
+.env
