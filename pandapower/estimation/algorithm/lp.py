@@ -134,7 +134,7 @@ class LPAlgorithm(BaseAlgorithm):
                 if af_lp:
                     # u_i >= 0, dE free, 0 <= alpha_i <= 1
                     bounds = LPAlgorithm._create_af_bounds(n, m, len(self.eppci["clusters"]), E)
-                    # bounds = [(None, None)] * n + [(0, None)] * m  # for debugging and to compare results
+                    # bounds = [(None, None)] * n + [(0, None)] * m  # for debugging and to compare results ToDo: remove after compare and debugging
                 else:
                     # u_i >= 0, dE free
                     bounds = [(None, None)] * n + [(0, None)] * m

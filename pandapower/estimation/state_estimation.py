@@ -114,8 +114,8 @@ def estimate(
             value 0.5 is default.
         af_target_value (float | np.ndarray | None):
             Optional pseudo-measurements (soft priors) for the allocation factors. Can be a scalar, a numpy array or
-            None. Acts as a preferred value for the allocation factors (e.g. alpha ≈ 0.4) in weakly observable cases and
-            regularizes the estimation toward this value, but does not enforce it if it conflicts with the overall
+            None. Acts as a preferred value for the allocation factors (e.g. ``alpha=0.4``) in weakly observable cases
+            and regularizes the estimation toward this value, but does not enforce it if it conflicts with the overall
             optimization of the state estimator. Specific value 0.4 used in a grid-operator use case.
         af_std_value (float | np.ndarray | None):
             Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, a numpy array or None.
@@ -316,7 +316,7 @@ class StateEstimation:
                 raise UserWarning("fuse_buses_with_bb_switch parameter is not correctly initialized")
             elif hasattr(fuse_buses_with_bb_switch, "__iter__"):
                 bus_to_be_fused = fuse_buses_with_bb_switch
-            set_bb_switch_impedance(self.net, bus_to_be_fused)
+            set_bb_switch_impedance(self.net, bus_to_be_fused)  # runpp() performed
 
         af_init_value = opt_vars.get("af_init_value", 0.5)  # set value to default 0.5 if no values are given
         af_target_value = opt_vars.get("af_target_value", None)

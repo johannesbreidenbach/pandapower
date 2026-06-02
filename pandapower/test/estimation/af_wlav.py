@@ -1115,9 +1115,7 @@ if __name__ == "__main__":
         net30 = _add_measurements_af(pn.case30(), 5, 112, .0, .0, .0)
 
     if bus18:
-        s_path = str(os.getenv("SAVE_PATH"))
-        # t_path = str(os.getenv("TEST_PATH"))
-        # t_10_path = str(os.getenv("TEST_10"))
+        s_path = str(os.getenv("PATH_0005"))
         create_random_grid_random_estimation(s_path, 1000, 112, .01, .01, .01)
         evaluation_af(s_path)
         evaluation_vp(s_path)
