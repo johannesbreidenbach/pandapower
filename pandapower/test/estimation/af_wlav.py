@@ -77,7 +77,11 @@ def _create_measurement_18_bus_grid(
         rq: float = .03
 ) -> None:
     """
-    Add measurements to a pandapower gird for state estimation.
+    Add measurements to the 18 bus test gird for state estimation.
+
+    This function adds a predefined set of measurement points at fixed locations. The measurement values are derived
+    from the power flow results of the grid and are perturbed with Gaussian noise, whose magnitude is controlled by the
+    given standard deviations.
 
     Parameters:
         net: power grid
@@ -221,6 +225,11 @@ def _create_18_bus_grid(
     A random operating point is generated for each simulation by scaling residential loads, commercial loads,
     PV generation and wind generation with uniformly distributed random factors.
 
+    For the **power flow calculation**, these randomly scaled (statistically perturbed) values are used.
+    For the **state estimation network**, the corresponding **nominal** (unscaled) load and generation values are
+    stored, while the power flow results (voltages, line flows, etc.) from the randomly scaled case ar copied into the
+    result tables of the state estimation network.
+
     Parameters:
         base_mva: Base apparent power of the system in MVA. Corresponds to ``Sb`` in the MATLAB implementation.
 
@@ -361,7 +370,8 @@ def _create_18_bus_grid(
     #
     # In pandapower:
     #     loads are modeled as positive consumption
-    #
+
+    # Nominal values these values are used for state estimation and adapted for powerflow claculation
     p_l_res = 2 * np.array([0.05, 0.08, 0, 0.05, 0, 0.06, 0, 0.02, 0.04, 0, 0.09, 0, 0.08, 0, 0, 0.05, 0.07])
     q_l_res = 2 * np.array([0.01, 0.02, 0, 0.01, 0, 0.01, 0, 0.01, 0.01, 0, 0.01, 0, 0.01, 0, 0, 0.01, 0.01])
 
@@ -408,7 +418,7 @@ def _create_18_bus_grid(
         k_dc["KG_wind"][idx] = var_g_wind
 
         # =====================================================================
-        # Apply scaling factors to nominal per-unit values
+        # Apply scaling factors to nominal per-unit values for powerflow
         # =====================================================================
         p_res_pu = float(p_l_res[idx] * var_l_res)
         q_res_pu = float(q_l_res[idx] * var_l_res)
@@ -454,8 +464,8 @@ def _create_18_bus_grid(
             create_load(
                 net_se,
                 bus=bus,
-                p_mw=p_l_res[idx] * base_mva,
-                q_mvar=q_l_res[idx] * base_mva,
+                p_mw=p_l_res[idx] * base_mva,  # nominal value
+                q_mvar=q_l_res[idx] * base_mva,  # nominal value
                 name=f"Residential Load Bus {idx + 2}",
                 type="residential"
             )
@@ -472,8 +482,8 @@ def _create_18_bus_grid(
             create_load(
                 net_se,
                 bus=bus,
-                p_mw=p_l_com[idx] * base_mva,
-                q_mvar=q_l_com[idx] * base_mva,
+                p_mw=p_l_com[idx] * base_mva,  # nominal value
+                q_mvar=q_l_com[idx] * base_mva,  # nominal value
                 name=f"Commercial Load Bus {idx + 2}",
                 type="commercial"
             )
@@ -490,8 +500,8 @@ def _create_18_bus_grid(
             create_sgen(
                 net_se,
                 bus=bus,
-                p_mw=p_g_pv[idx] * base_mva,
-                q_mvar=q_g_pv[idx] * base_mva,
+                p_mw=p_g_pv[idx] * base_mva,  # nominal value
+                q_mvar=q_g_pv[idx] * base_mva,  # nominal value
                 name=f"PV Bus {idx + 2}",
                 type="pv"
             )
@@ -508,8 +518,8 @@ def _create_18_bus_grid(
             create_sgen(
                 net_se,
                 bus=bus,
-                p_mw=p_g_wind[idx] * base_mva,
-                q_mvar=q_g_wind[idx] * base_mva,
+                p_mw=p_g_wind[idx] * base_mva,  # nominal value
+                q_mvar=q_g_wind[idx] * base_mva,  # nominal value
                 name=f"Wind Bus {idx + 2}",
                 type="wind"
             )
@@ -517,15 +527,8 @@ def _create_18_bus_grid(
     # =========================================================================
     # Run power flow calculation
     # =========================================================================
-    #
-    # The BFSW (Backward-Forward Sweep) algorithm is used because:
-    #
-    #   - the network is radial
-    #   - the network has high R/X ratios
-    #   - some lines have very small reactance
-    #
-    # BFSW is numerically more robust for distribution grids than Newton-Raphson in this case.
-    #
+    # after run powerflow the results will save in the net tables for state estimation
+    # ToDo: for future general use net_pf and net_se should separately return
     runpp(net_pf)
     for key in net_pf.keys():
         if key.startswith("res_"):
@@ -535,67 +538,74 @@ def _create_18_bus_grid(
 
 def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save_path: str = ".") -> None:
     """
-    Run three different state estimations (AF-WLS, AF-WLAV, AF-LAV) on a specific power grid and return bus voltages,
-    angles, deviations and the allocation factors. The power grid is unobservable.
+    un three different allocation-factor-based state estimation methods (AF-WLS, AF-WLAV, AF-LAV) for a specific power
+    grid and return bus voltages, angles, deviations and the allocation factors. The power grid is unobservable.
 
-    The power grid is solved once with a power flow, measurements are created. The power grid is copied for each
-    estimation algorithm. Different types of results from power flow and estimation are collected in different
-    DataFrames, which will save.
+    For each estimator:
+        1. A deep copy of ``net_base`` is created.
+        2. State estimation is run with the specified algorithm.
+        3. The resulting pandapower network, including state estimation results, is saved as a JSON file.
+        4. The estimated allocation factors are collected, and a method-specific index (AF-WLS, AF-LAV, AF-WLAV) is
+           assigned.
+        5. If the estimator does not converge (``success`` is False), a failure message is appended to ``failures``.
+
+    After all three estimations have been performed, the allocation factors of all methods are concatenated into a
+    single DataFrame and saved as a CSV file.
 
     Parameters:
-        net_base: A pandapower grid, where the different state estimation solver will be used.
-        num_it: String which contains the number of iterations.
-        save_path: path where the resolution dataframes will save.
-        failures: Save all estimation, which does not calc a state estimation (does not found solution).
+        net_base: Base pandapower grid on which all three state estimation methods are applied.
+        failures: List that is extended by a text entry for each estimation that fails to converge.
+        num_it: Identifier for this run (e.g. iteration counter) used in all output filenames.
+        save_path: Directory where the JSON and CSV result files are stored.
 
     Returns:
         None
     """
-    # 1. create copies for each estimation algorithm
-    if failures is None:
-        failures = []
 
-    # AF-WLS
+    # run AF-WLS estimation
     af_wls_file = os.path.join(save_path, f"af_wls_{num_it}.json")
     if os.path.exists(af_wls_file):
         print(f"file {af_wls_file} already exists")
     else:
         net_af_wls = copy.deepcopy(net_base)
         af_wls = estimate(net_af_wls, algorithm="af-wls", wlav=False)  # , af_target_value=.4, af_std_value=.15
-        af_wls["allocation_factors"].index = ["AF-WLS"]
+        af_wls["allocation_factors"].index = ["AF-WLS"]  # set index for saving data
         if not af_wls["success"]:
-            failures.append(f"AF-WLS, {num_it}, failed")
-        to_json(net_af_wls, af_wls_file)
+            failures.append(f"AF-WLS, {num_it}, failed")  # add failures information to a list
+        to_json(net_af_wls, af_wls_file)  # save grid to json
 
-    # LAV
+    # run LAV estimation
     af_lav_file = os.path.join(save_path, f"af_lav_{num_it}.json")
     if os.path.exists(af_lav_file):
         print(f"file {af_lav_file} already exists")
     else:
         net_af_lav = copy.deepcopy(net_base)
         af_lav = estimate(net_af_lav, algorithm="af-lp", wlav=False, with_ortools=False)
-        af_lav["allocation_factors"].index = ["AF-LAV"]
+        af_lav["allocation_factors"].index = ["AF-LAV"]  # set index for saving data
         if not af_lav["success"]:
             failures.append(f"AF-LAV, {num_it}, failed")
         to_json(net_af_lav, af_lav_file)
 
-    # AF-WLAV
+    # run AF-WLAV estimation
     af_wlav_file = os.path.join(save_path, f"af_wlav_{num_it}.json")
     if os.path.exists(af_wlav_file):
         print(f"file {af_wlav_file} already exists")
     else:
         net_af_wlav = copy.deepcopy(net_base)
         af_wlav = estimate(net_af_wlav, algorithm="af-lp", wlav=True, with_ortools=False)
-        af_wlav["allocation_factors"].index = ["AF-WLAV"]
+        af_wlav["allocation_factors"].index = ["AF-WLAV"]  # set index for saving data
         if not af_wlav["success"]:
             failures.append(f"AF-WLAV, {num_it}, failed")
         to_json(net_af_wlav, af_wlav_file)
 
+    # save allocation factors from all estimation solvers in one csv file
     res_af_file = os.path.join(save_path, f"af_df_{num_it}.csv")
     if os.path.exists(res_af_file):
         print(f"file {res_af_file} already exists")
     else:
-        res_af_df = pd.concat([af_wls["allocation_factors"], af_wlav["allocation_factors"], af_lav["allocation_factors"]])
+        res_af_df = pd.concat(
+            [af_wls["allocation_factors"], af_wlav["allocation_factors"], af_lav["allocation_factors"]]
+        )
         res_af_df.to_csv(res_af_file, index=True)
 
 
@@ -608,27 +618,29 @@ def create_random_grid_random_estimation(
         rq: float = .03
 ) -> None:
     """
-    Every iteration will compute random value for load and gen for the powerflow calculation. In addition, also for the
-    measurement for state estimation.
+    Every iteration applies random perturbations to the load and generation values used in the power flow calculation
+    and, in addition, to the measurement values used for state estimation.
 
     Parameters:
         path: Place where grid and allocation factors will be saved.
         itr: Number of iterations.
-        seed: Optional random seed for reproducible simulations.If ``None``, random values are generated for every call.
+        seed:
+            Optional random seed for reproducible simulations. If ``None``, random values are generated for every call.
         rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
         rp: standard deviation to apply a multiplicative perturbation to quantities for active power
         rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
     Returns: None
     """
-    # seed:
+
     np.random.seed(seed)
-    failures: list = []
+    failures: list = []  # The list contains information about the final status of the state estimation
     for i in range(itr):
-        name_str = f"{i:03d}"
+        name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
         net18, k = _create_18_bus_grid()
         _create_measurement_18_bus_grid(net=net18, rv=rv, rp=rp, rq=rq)  #
         calc_different_se(net18, failures, name_str, path)
 
+    # if failures is not empty the list will save as txt file.
     if not failures:
         print("List is empty, very good")
     else:
@@ -636,18 +648,22 @@ def create_random_grid_random_estimation(
         with open(os.path.join(path, "failures.txt"), "w", encoding="utf-8") as f:
             for failure in failures:
                 f.write(failure + "\n")
-        raise UserWarning(f"Failures exist: {failures}")
 
 
-def evaluation_af(path: str = ".") -> None:
+def load_failures(path: str = ".") -> set[tuple[str, int]]:
+    """
+    Load previously recorded failed solver runs from a text file and return them as a set of ``(solver, iteration)``
+    tuples.
 
-    html_file = os.path.join(path, "allocation_factor_plots.html")
-    if os.path.exists(html_file):
-        print(f"html file already exists: {html_file}")
-        return
-    # -------------------------------------------------------------------------
-    # Read in failures
-    # -------------------------------------------------------------------------
+    The function reads the file ``failures.txt`` located in ``path``. Each row is expected to contain a solver name,
+    an iteration number, and a status field. The status column is ignored when constructing the return value.
+
+    Parameters:
+        path: Directory containing the ``failures.txt`` file. Defaults to the current working directory (``"."``).
+
+    Returns:
+        Set of unique ``(solver, iteration)`` pairs representing failed solver runs.
+    """
     failures = pd.read_csv(
         os.path.join(path, "failures.txt"),
         header=None,
@@ -657,32 +673,63 @@ def evaluation_af(path: str = ".") -> None:
     )
     failures["iteration"] = failures["iteration"].astype(int)
     failure_set = set(zip(failures["solver"], failures["iteration"]))
+    return failure_set
+
+
+def evaluation_af(path: str = ".") -> None:
+    """
+    Evaluate and visualize the distribution of allocation factors across all simulation runs.
+
+    This function aggregates allocation factor results from multiple CSV files (``af_df_*.csv``), excludes failed state
+    estimation runs listed in ``failures.txt``, and creates an HTML file containing boxplots and histograms for each
+    allocation factor and solver. Creates the file ``allocation_factor_plots.html`` in ``path``, containing for each
+    solver and allocation factor:
+        * a boxplot of the allocation factor over all valid iterations, and
+        * a histogram of the corresponding value distribution.
+
+    Parameters:
+        path:
+            Directory where the result files are stored and where the HTML report (``allocation_factor_plots.html``)
+            will be written. Defaults to the current directory (" . "). Expected files:
+                * ``failures.txt``: text file with three columns (solver, iteration, status), used to identify and skip
+                    failed runs.
+                * ``af_df_*.csv``: CSV files containing allocation factor results for each iteration. Each file must
+                    have solvers as index (e.g. ``AF-WLS``, ``AF-LAV``, ``AF-WLAV``) and allocation factors as columns.
+
+    Raises:
+        FileNotFoundError: If no CSV files matching ``af_df_*.csv`` are found in the given directory.
+    """
+    html_file = os.path.join(path, "allocation_factor_plots.html")  # check if the file exists
+    if os.path.exists(html_file):
+        print(f"html file already exists: {html_file}")
+        return
     # -------------------------------------------------------------------------
-    # Read in CSV file
+    # Read in failures
+    # -------------------------------------------------------------------------
+    failure_set = load_failures(path)
+    # -------------------------------------------------------------------------
+    # Read in CSV file with allocation factors
     # -------------------------------------------------------------------------
     csv_files = sorted(
         os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_df_") and f.endswith(".csv")
     )
     if not csv_files:
         raise FileNotFoundError("No af_df_*.csv files found")
-
+    # load general data about solver and allocation factors
     solver_ls = pd.read_csv(csv_files[0], index_col=0).index.tolist()
     af_ls = pd.read_csv(csv_files[0], index_col=0).columns.tolist()
     # -------------------------------------------------------------------------
     # collect data
     # -------------------------------------------------------------------------
     af_total_dc = {solver: pd.DataFrame(columns=af_ls) for solver in solver_ls}
-
     for i in range(len(csv_files)):
         if not os.path.exists(csv_files[i]):
             print(f"Fehlt: {csv_files[i]}")
             continue
-
-        df = pd.read_csv(csv_files[i], index_col=0)
         for solver in solver_ls:
-
-            if (solver, i) in failure_set:
+            if (solver, i) in failure_set:  # only data are added, where the state estimation runs successfully
                 continue
+            df = pd.read_csv(csv_files[i], index_col=0)
             af_total_dc[solver].loc[i, af_ls] = df.loc[solver]
     # -------------------------------------------------------------------------
     # Plot erstellen
@@ -692,7 +739,6 @@ def evaluation_af(path: str = ".") -> None:
     total_rows = rows_box + rows_hist
 
     subplot_titles = []
-
     for solver in solver_ls:
         for af in af_ls:
             subplot_titles.append(f"Boxplot<br>{solver}<br>{af}")
@@ -701,19 +747,12 @@ def evaluation_af(path: str = ".") -> None:
         for af in af_ls:
             subplot_titles.append(f"Histogram<br>{solver}<br>{af}")
 
-    fig = make_subplots(
-        rows=total_rows,
-        cols=len(af_ls),
-        subplot_titles=subplot_titles,
-        vertical_spacing=0.05
-    )
+    fig = make_subplots(rows=total_rows, cols=len(af_ls), subplot_titles=subplot_titles, vertical_spacing=0.05)
     # -------------------------------------------------------------------------
     # Boxplots
     # -------------------------------------------------------------------------
-    for row, solver in enumerate(solver_ls, start=1):
-
+    for row, solver in enumerate(solver_ls, start=1):  # plotly starts with 1
         df_solver = af_total_dc[solver]
-
         for col, af in enumerate(af_ls, start=1):
             fig.add_trace(
                 go.Box(
@@ -727,13 +766,11 @@ def evaluation_af(path: str = ".") -> None:
             )
 
     # -------------------------------------------------------------------------
-    # Histogramme
+    # Histogram in same HTML file like boxplot
     # -------------------------------------------------------------------------
     for row_offset, solver in enumerate(solver_ls, start=1):
-
         df_solver = af_total_dc[solver]
         row = rows_box + row_offset
-
         for col, af in enumerate(af_ls, start=1):
             fig.add_trace(
                 go.Histogram(
@@ -755,14 +792,26 @@ def evaluation_af(path: str = ".") -> None:
         width=1600,
         margin=dict(t=200)
     )
-
     fig.write_html(html_file)
-
     print(f"saved html to: {html_file}")
 
 
 def load_net_cached(json_file: str) -> pandapowerNet:
+    """
+    Load a pandapower network from a JSON file using a pickle-based cache.
 
+    If a corresponding pickle file (``.pkl``) exists, the network is loaded directly from the cache. Otherwise, the
+    network is loaded from the JSON file, stored as a pickle file for future use, and returned.
+
+    This function can significantly reduce loading times when the same network files are accessed repeatedly during
+    evaluation and debugging.
+
+    Parameters:
+        json_file: Path to the pandapower JSON file.
+
+    Returns:
+        Loaded pandapower network.
+    """
     cache_file = json_file.replace(".json", ".pkl")
 
     if os.path.exists(cache_file):
@@ -777,12 +826,65 @@ def load_net_cached(json_file: str) -> pandapowerNet:
     return net
 
 
-def build_eval_dataframe(result_dict, variable="vm_pu"):
+def build_eval_dataframe(result_dict, variable="vm_pu") -> pd.DataFrame:
+    """
+    Construct an evaluation DataFrame from simulation result tables.
+
+    The function extracts the specified variable from each result DataFrame in ``result_dict`` and combines the values
+    into a single DataFrame. Each row corresponds to one simulation iteration, while each column corresponds to a
+    network element (e.g. bus or line).
+
+    Parameters:
+        result_dict: Dictionary mapping iteration numbers to pandas DataFrames containing simulation results.
+        variable: Name of the result column to extract from each DataFrame. Defaults to ``"vm_pu"``.
+
+    Returns:
+        DataFrame containing the selected variable for all iterations. Rows represent iterations and columns represent
+        network elements. The index is sorted in ascending order.
+    """
     return pd.DataFrame({iteration: df[variable].astype(float) for iteration, df in result_dict.items()}).T.sort_index()
 
 
 def evaluation_vp(path: str = ".") -> None:
+    """
+    Evaluate voltage magnitude and branch active power estimation results for all state estimation methods and generate
+    interactive HTML visualizations.
 
+    This function loads the result networks of the three allocation-factor-based state estimation methods (AF-WLS,
+    AF-WLAV, AF-LAV), excludes failed runs listed in ``failures.txt``, and compares estimated values against the true
+    network results.
+
+    For each estimator:
+        1. Bus voltage magnitudes (``vm_pu``) and branch active powers (``p_from_mw``) are collected from all successful
+            simulation runs.
+        2. Mean values of the true and estimated quantities are calculated for each bus and branch.
+        3. The root-mean-square error (RMSE) is determined and converted into an expanded uncertainty using a coverage
+            factor of ``k = 3``.
+        4. Interactive Plotly figures are created showing:
+               * estimated and true voltage magnitudes,
+               * estimated and true branch active powers,
+               * expanded uncertainty of the voltage magnitude estimates.
+        5. The figures are saved as separate HTML files.
+
+    The following output files are created:
+        * ``voltage_magnitude.html``: Mean estimated and true bus voltage magnitudes with uncertainty bands.
+        * ``line_power.html``: Mean estimated and true branch active powers with uncertainty bands.
+        * ``voltage_uncertainty.html``: Expanded uncertainty of the voltage magnitude estimates.
+
+    Parameters:
+        path:
+            Directory containing the result files and where the generated HTML reports will be written. Defaults to the
+            current directory ("."). Expected files:
+
+                * ``failures.txt``: Text file with three columns (solver, iteration, status), used to identify and skip
+                    failed state estimation runs.
+                * ``af_wls_*.json``: Result networks generated with the AF-WLS estimator.
+                * ``af_wlav_*.json``: Result networks generated with the AF-WLAV estimator.
+                * ``af_lav_*.json``: Result networks generated with the AF-LAV estimator.
+
+    Raises:
+        FileNotFoundError: If required JSON result files cannot be found.
+    """
     html_vm_file = os.path.join(path, "voltage_magnitude.html")
     html_lp_file = os.path.join(path, "line_power.html")
     html_ve_file = os.path.join(path, "voltage_uncertainty.html")
@@ -792,20 +894,11 @@ def evaluation_vp(path: str = ".") -> None:
     # -------------------------------------------------------------------------
     # Read in failures
     # -------------------------------------------------------------------------
-    failures = pd.read_csv(
-        os.path.join(path, "failures.txt"),
-        header=None,
-        names=["solver", "iteration", "status"],
-        skipinitialspace=True,
-        dtype={"solver": str, "iteration": str, "status": str}
-    )
-    failures["iteration"] = failures["iteration"].astype(int)
-    failure_set = set(zip(failures["solver"], failures["iteration"]))
+    failure_set = load_failures(path)
     # -------------------------------------------------------------------------
-    # Read in data from json
+    # Read in bus and line data from json
     # -------------------------------------------------------------------------
     solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
-    # solver_file_ls = ["af_wls", "af_wlav", "af_lav"]
 
     wls_ls = sorted(
         os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_wls_") and f.endswith(".json")
@@ -827,7 +920,6 @@ def evaluation_vp(path: str = ".") -> None:
 
     for i in range(len(wls_ls)):
         for j in range(len(solver_ls)):
-
             if (solver_ls[j], i) in failure_set:
                 print(f"skip failure: solver={solver_ls[j]}, iteration={i}")
                 continue
@@ -874,7 +966,7 @@ def evaluation_vp(path: str = ".") -> None:
         vm_error = vm_est - vm_true
         vm_rmse = np.sqrt((vm_error ** 2).mean(axis=0))
         # clac expanded uncertainty
-        vm_U = k * vm_rmse
+        vm_u = k * vm_rmse
 
         x_bus = np.arange(len(vm_est_mean))
 
@@ -883,8 +975,8 @@ def evaluation_vp(path: str = ".") -> None:
             go.Scatter(
                 x=np.concatenate([x_bus, x_bus[::-1]]),
                 y=np.concatenate([
-                    (vm_est_mean + vm_U).to_numpy(),
-                    (vm_est_mean - vm_U).to_numpy()[::-1]
+                    (vm_est_mean + vm_u).to_numpy(),
+                    (vm_est_mean - vm_u).to_numpy()[::-1]
                 ]),
                 fill="toself",
                 line=dict(width=0),
@@ -892,7 +984,7 @@ def evaluation_vp(path: str = ".") -> None:
                 name=f"{solver} uncertainty"
             )
         )
-
+        # plot mean value from estimated voltage magnitude for every bus
         fig_vm.add_trace(
             go.Scatter(
                 x=x_bus,
@@ -901,7 +993,7 @@ def evaluation_vp(path: str = ".") -> None:
                 name=f"{solver} estimated V"
             )
         )
-
+        # plot mean value from calculated voltage magnitude (powerflow) for every bus
         fig_vm.add_trace(
             go.Scatter(
                 x=x_bus,
@@ -913,7 +1005,7 @@ def evaluation_vp(path: str = ".") -> None:
         )
 
         # ---------------------------------------------------------------------
-        # Branch active power
+        # Branch active power same like voltage magnitude above
         # ---------------------------------------------------------------------
         p_true = build_eval_dataframe(res_line_dc[solver], "p_from_mw").astype(float)
         p_est = build_eval_dataframe(res_line_est_dc[solver], "p_from_mw").astype(float)
@@ -923,7 +1015,7 @@ def evaluation_vp(path: str = ".") -> None:
 
         p_error = p_est - p_true
         p_rmse = np.sqrt((p_error ** 2).mean(axis=0))
-        p_U = k * p_rmse
+        p_u = k * p_rmse
 
         x_line = np.arange(len(p_est_mean))
 
@@ -931,8 +1023,8 @@ def evaluation_vp(path: str = ".") -> None:
             go.Scatter(
                 x=np.concatenate([x_line, x_line[::-1]]),
                 y=np.concatenate([
-                    (p_est_mean + p_U).to_numpy(),
-                    (p_est_mean - p_U).to_numpy()[::-1]
+                    (p_est_mean + p_u).to_numpy(),
+                    (p_est_mean - p_u).to_numpy()[::-1]
                 ]),
                 fill="toself",
                 line=dict(width=0),
@@ -940,7 +1032,6 @@ def evaluation_vp(path: str = ".") -> None:
                 name=f"{solver} uncertainty"
             )
         )
-
         fig_lp.add_trace(
             go.Scatter(
                 x=x_line,
@@ -949,7 +1040,6 @@ def evaluation_vp(path: str = ".") -> None:
                 name=f"{solver} estimated P"
             )
         )
-
         fig_lp.add_trace(
             go.Scatter(
                 x=x_line,
@@ -966,7 +1056,7 @@ def evaluation_vp(path: str = ".") -> None:
         fig_ve.add_trace(
             go.Scatter(
                 x=x_bus,
-                y=(100 * vm_U).to_numpy(),
+                y=(100 * vm_u).to_numpy(),
                 mode="lines",
                 name=f"{solver} V uncertainty [%]"
             )
@@ -1028,7 +1118,6 @@ if __name__ == "__main__":
         s_path = str(os.getenv("SAVE_PATH"))
         # t_path = str(os.getenv("TEST_PATH"))
         # t_10_path = str(os.getenv("TEST_10"))
-        # ToDo: write comments and doc strings
         create_random_grid_random_estimation(s_path, 1000, 112, .01, .01, .01)
         evaluation_af(s_path)
         evaluation_vp(s_path)
