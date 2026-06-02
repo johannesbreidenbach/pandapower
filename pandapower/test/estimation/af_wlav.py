@@ -220,7 +220,7 @@ def _create_18_bus_grid(
     (PV) generation, and wind generation connected to different buses.
 
     The original MATLAB implementation uses per-unit (p.u.) values. Since pandapower expects physical units, all line
-    impedances and power values are converted to engineering units before creating the network elements.
+    impedance and power values are converted to engineering units before creating the network elements.
 
     A random operating point is generated for each simulation by scaling residential loads, commercial loads,
     PV generation and wind generation with uniformly distributed random factors.
@@ -260,7 +260,7 @@ def _create_18_bus_grid(
     #
     # pandapower expects physical units:
     #   - voltage in kV
-    #   - power in MW / MVAr
+    #   - power in MW / MVAR
     #   - impedance in Ohm
     #
     # Therefore, the per-unit values must be converted.
@@ -278,7 +278,7 @@ def _create_18_bus_grid(
     # This gives:
     #     Z_base = 11² / 10 = 12.1 Ohm
     #
-    # Used to convert line impedances:
+    # Used to convert line impedance:
     #
     #     Z_ohm = Z_pu * Z_base
     z_base = (v_b ** 2) / base_mva  # Ohm
@@ -322,9 +322,9 @@ def _create_18_bus_grid(
                      0.0010, 0.0007, 0.0013, 0.0009, 0.0004])  # change zeros to small value for pf-calc
     # Create lines
     #
-    # The MATLAB data provides total line impedances in per-unit.
+    # The MATLAB data provides total line impedance in per-unit.
     #
-    # Pandapower requires:
+    # pandapower requires:
     #     r_ohm_per_km
     #     x_ohm_per_km
     #
@@ -371,7 +371,7 @@ def _create_18_bus_grid(
     # In pandapower:
     #     loads are modeled as positive consumption
 
-    # Nominal values these values are used for state estimation and adapted for powerflow claculation
+    # Nominal values these values are used for state estimation and adapted for powerflow calculation
     p_l_res = 2 * np.array([0.05, 0.08, 0, 0.05, 0, 0.06, 0, 0.02, 0.04, 0, 0.09, 0, 0.08, 0, 0, 0.05, 0.07])
     q_l_res = 2 * np.array([0.01, 0.02, 0, 0.01, 0, 0.01, 0, 0.01, 0.01, 0, 0.01, 0, 0.01, 0, 0, 0.01, 0.01])
 
@@ -433,14 +433,14 @@ def _create_18_bus_grid(
         q_wind_pu = float(q_g_wind[idx] * var_g_wind)
 
         # =====================================================================
-        # Convert per-unit values to MW / MVAr
+        # Convert per-unit values to MW / MVAR
         # =====================================================================
         #
         # Conversion:
         #
         #     P_MW = P_pu * S_base
         #
-        #     Q_MVAr = Q_pu * S_base
+        #     Q_MVAR = Q_pu * S_base
         #
         # Loads are created as separate elements:
         #     - residential
@@ -724,7 +724,7 @@ def evaluation_af(path: str = ".") -> None:
     af_total_dc = {solver: pd.DataFrame(columns=af_ls) for solver in solver_ls}
     for i in range(len(csv_files)):
         if not os.path.exists(csv_files[i]):
-            print(f"Fehlt: {csv_files[i]}")
+            print(f"Missing: {csv_files[i]}")
             continue
         for solver in solver_ls:
             if (solver, i) in failure_set:  # only data are added, where the state estimation runs successfully
@@ -732,7 +732,7 @@ def evaluation_af(path: str = ".") -> None:
             df = pd.read_csv(csv_files[i], index_col=0)
             af_total_dc[solver].loc[i, af_ls] = df.loc[solver]
     # -------------------------------------------------------------------------
-    # Plot erstellen
+    # create plot
     # -------------------------------------------------------------------------
     rows_box = len(solver_ls)
     rows_hist = len(solver_ls)
