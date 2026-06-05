@@ -63,12 +63,13 @@ def estimate(
             - "opt": optimization-based algorithm
             - "irwls": iteratively reweighted WLS (robust estimation)
             - "lp": linear programming–based approach
-            - "af-wls": WLS using allocation factors
-            - "af-lp": LP-based approach using allocation factors.
+            - "af-wls": WLS using allocation factors (af) -> set type for sgen, load, etc.
+            - "af-lp": LP-based approach using af -> set type for sgen, load, etc.
 
             The algorithms with allocation factor (af), "af-wls" and "af-lp", internally call upon the classes "wls"
             :class:`WLSAlgorithm` and "lp" :class:`LPAlgorithm`. The allocation factor :math:`\\alpha` is handled in
-            `estimation/ppc_conversion.py` and `estimation/algorithm/matrix_base.py`.
+            `estimation/ppc_conversion.py` and `estimation/algorithm/matrix_base.py`. When creating generators and
+            loads, a type must be specified for af.
 
         init (string): Initial voltage for the estimation. 'flat' sets 1.0 p.u. / 0° for all buses, 'results' uses the
             values from *res_bus* if available and 'slack' considers the slack bus voltage (and optionally, angle) as
@@ -111,16 +112,16 @@ def estimate(
         with_ortools (bool):
             Alternative solver to scipy for (W)LAV using `OR-Tools solver <https://github.com/google/or-tools>`_
         af_init_value (float | np.ndarray):
-            Initial values for the allocation factors in E vector. One Value for all or an array for explicite. The
+            Initial values for the af in E vector. One Value for all or an array for explicite. The
             value 0.5 is default.
         af_target_value (float | np.ndarray | None):
-            Optional pseudo-measurements (soft priors) for the allocation factors. Can be a scalar, a numpy array or
-            None. Acts as a preferred value for the allocation factors (e.g. ``alpha=0.4``) in weakly observable cases
-            and regularizes the estimation toward this value, but does not enforce it if it conflicts with the overall
-            optimization of the state estimator. Specific value 0.4 used in a grid-operator use case.
+            Optional pseudo-measurements (soft priors) for the af. Can be a scalar, a numpy array or None. Acts as a
+            preferred value for the af (e.g. ``alpha=0.4``) in weakly observable cases and regularizes the estimation
+            toward this value, but does not enforce it if it conflicts with the overall optimization of the state
+            estimator. Specific value 0.4 used in a grid-operator use case.
         af_std_value (float | np.ndarray | None):
             Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, a numpy array or None.
-            Controls how strongly the pseudo-measurements for the allocation factors (e.g. 0.15) influence the
+            Controls how strongly the pseudo-measurements for the af (e.g. 0.15) influence the
             estimation: smaller values imply a stronger pull toward `af_target_value`, larger values make the
             prior weaker. Specific value 0.15 used in a grid-operator use case.
 
@@ -132,8 +133,7 @@ def estimate(
                 - ``"success"`` (bool): Flag indicating whether the state estimation finished successfully.
                 - ``"num_iterations"`` (int): Number of iterations performed by the solver.
                 - ``"objective_function_value"`` (float): Final value of the objective function.
-                - ``"allocation_factors"`` (DataFrame): Estimated allocation factors (only meaningful for AF-based
-                                                        algorithms).
+                - ``"allocation_factors"`` (DataFrame): Estimated af (only meaningful for AF-based algorithms).
                 - ``"time"`` (str): Timestamp of the estimation in the format ``"YYYY-MM-DD HH:MM:SS"``.
 
             For all other algorithms the dictionary contains only:

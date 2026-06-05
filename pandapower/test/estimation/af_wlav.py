@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+import simbench as sb
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -14,7 +15,7 @@ from dotenv import load_dotenv
 
 # imports from pandapower
 import pandapower.networks as pn
-from pandapower import to_json, from_json
+from pandapower import to_pickle, from_pickle
 from pandapower.run import runpp
 from pandapower.estimation import estimate
 from pandapower.create import (create_measurement, create_empty_network, create_bus, create_ext_grid,
@@ -544,7 +545,7 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
     For each estimator:
         1. A deep copy of ``net_base`` is created.
         2. State estimation is run with the specified algorithm.
-        3. The resulting pandapower network, including state estimation results, is saved as a JSON file.
+        3. The resulting pandapower network, including state estimation results, is saved as a pickle file.
         4. The estimated allocation factors are collected, and a method-specific index (AF-WLS, AF-LAV, AF-WLAV) is
            assigned.
         5. If the estimator does not converge (``success`` is False), a failure message is appended to ``failures``.
@@ -556,14 +557,14 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
         net_base: Base pandapower grid on which all three state estimation methods are applied.
         failures: List that is extended by a text entry for each estimation that fails to converge.
         num_it: Identifier for this run (e.g. iteration counter) used in all output filenames.
-        save_path: Directory where the JSON and CSV result files are stored.
+        save_path: Directory where the PICKLE and CSV result files are stored.
 
     Returns:
         None
     """
 
     # run AF-WLS estimation
-    af_wls_file = os.path.join(save_path, f"af_wls_{num_it}.json")
+    af_wls_file = os.path.join(save_path, f"af_wls_{num_it}.p")
     if os.path.exists(af_wls_file):
         print(f"file {af_wls_file} already exists")
     else:
@@ -572,10 +573,10 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
         af_wls["allocation_factors"].index = ["AF-WLS"]  # set index for saving data
         if not af_wls["success"]:
             failures.append(f"AF-WLS, {num_it}, failed")  # add failures information to a list
-        to_json(net_af_wls, af_wls_file)  # save grid to json
+        to_pickle(net_af_wls, af_wls_file)  # save grid to pickle
 
     # run LAV estimation
-    af_lav_file = os.path.join(save_path, f"af_lav_{num_it}.json")
+    af_lav_file = os.path.join(save_path, f"af_lav_{num_it}.p")
     if os.path.exists(af_lav_file):
         print(f"file {af_lav_file} already exists")
     else:
@@ -584,10 +585,10 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
         af_lav["allocation_factors"].index = ["AF-LAV"]  # set index for saving data
         if not af_lav["success"]:
             failures.append(f"AF-LAV, {num_it}, failed")
-        to_json(net_af_lav, af_lav_file)
+        to_pickle(net_af_lav, af_lav_file)
 
     # run AF-WLAV estimation
-    af_wlav_file = os.path.join(save_path, f"af_wlav_{num_it}.json")
+    af_wlav_file = os.path.join(save_path, f"af_wlav_{num_it}.p")
     if os.path.exists(af_wlav_file):
         print(f"file {af_wlav_file} already exists")
     else:
@@ -596,7 +597,7 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
         af_wlav["allocation_factors"].index = ["AF-WLAV"]  # set index for saving data
         if not af_wlav["success"]:
             failures.append(f"AF-WLAV, {num_it}, failed")
-        to_json(net_af_wlav, af_wlav_file)
+        to_pickle(net_af_wlav, af_wlav_file)
 
     # save allocation factors from all estimation solvers in one csv file
     res_af_file = os.path.join(save_path, f"af_df_{num_it}.csv")
@@ -609,7 +610,7 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
         res_af_df.to_csv(res_af_file, index=True)
 
 
-def create_random_grid_random_estimation(
+def create_random_18_bus_grid_random_estimation(
         path: str = ".",
         itr: int = 1000,
         seed: int = 112,
@@ -796,36 +797,6 @@ def evaluation_af(path: str = ".") -> None:
     print(f"saved html to: {html_file}")
 
 
-def load_net_cached(json_file: str) -> pandapowerNet:
-    """
-    Load a pandapower network from a JSON file using a pickle-based cache.
-
-    If a corresponding pickle file (``.pkl``) exists, the network is loaded directly from the cache. Otherwise, the
-    network is loaded from the JSON file, stored as a pickle file for future use, and returned.
-
-    This function can significantly reduce loading times when the same network files are accessed repeatedly during
-    evaluation and debugging.
-
-    Parameters:
-        json_file: Path to the pandapower JSON file.
-
-    Returns:
-        Loaded pandapower network.
-    """
-    cache_file = json_file.replace(".json", ".pkl")
-
-    if os.path.exists(cache_file):
-        with open(cache_file, "rb") as f:
-            return pickle.load(f)
-
-    net = from_json(json_file)
-
-    with open(cache_file, "wb") as f:
-        pickle.dump(net, f)
-
-    return net
-
-
 def build_eval_dataframe(result_dict, variable="vm_pu") -> pd.DataFrame:
     """
     Construct an evaluation DataFrame from simulation result tables.
@@ -878,12 +849,12 @@ def evaluation_vp(path: str = ".") -> None:
 
                 * ``failures.txt``: Text file with three columns (solver, iteration, status), used to identify and skip
                     failed state estimation runs.
-                * ``af_wls_*.json``: Result networks generated with the AF-WLS estimator.
-                * ``af_wlav_*.json``: Result networks generated with the AF-WLAV estimator.
-                * ``af_lav_*.json``: Result networks generated with the AF-LAV estimator.
+                * ``af_wls_*.p``: Result networks generated with the AF-WLS estimator.
+                * ``af_wlav_*.p``: Result networks generated with the AF-WLAV estimator.
+                * ``af_lav_*.p``: Result networks generated with the AF-LAV estimator.
 
     Raises:
-        FileNotFoundError: If required JSON result files cannot be found.
+        FileNotFoundError: If required PICKLE result files cannot be found.
     """
     html_vm_file = os.path.join(path, "voltage_magnitude.html")
     html_lp_file = os.path.join(path, "line_power.html")
@@ -896,21 +867,21 @@ def evaluation_vp(path: str = ".") -> None:
     # -------------------------------------------------------------------------
     failure_set = load_failures(path)
     # -------------------------------------------------------------------------
-    # Read in bus and line data from json
+    # Read in bus and line data from pickle
     # -------------------------------------------------------------------------
     solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
 
     wls_ls = sorted(
-        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_wls_") and f.endswith(".json")
+        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_wls_") and f.endswith(".p")
     )
     wlav_ls = sorted(
-        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_wlav_") and f.endswith(".json")
+        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_wlav_") and f.endswith(".p")
     )
     lav_ls = sorted(
-        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_lav_") and f.endswith(".json")
+        os.path.join(path, f) for f in os.listdir(path) if f.startswith("af_lav_") and f.endswith(".p")
     )
 
-    json_files_ls = [wls_ls, wlav_ls, lav_ls]
+    pkl_files_ls = [wls_ls, wlav_ls, lav_ls]
 
     res_bus_dc = {solver: {} for solver in solver_ls}
     res_bus_est_dc = {solver: {} for solver in solver_ls}
@@ -923,8 +894,7 @@ def evaluation_vp(path: str = ".") -> None:
             if (solver_ls[j], i) in failure_set:
                 print(f"skip failure: solver={solver_ls[j]}, iteration={i}")
                 continue
-            # net_ij = load_net_cached(json_files_ls[j][i])  # faster for debugging
-            net_ij = from_json(json_files_ls[j][i])
+            net_ij = from_pickle(pkl_files_ls[j][i])
 
             if not hasattr(net_ij, "res_bus"):
                 print(f"missing res_bus: solver={solver_ls[j]}, iteration={i}")
@@ -1102,7 +1072,8 @@ if __name__ == "__main__":
     mv_b: bool = False
     ieee14_b: bool = False
     ieee30_b: bool = False
-    bus18: bool = True
+    bus18_b: bool = False
+    simbench_b: bool = True
 
     if mv_b:
         # rv=.01, rp=.03, rq=.03
@@ -1114,10 +1085,38 @@ if __name__ == "__main__":
     if ieee30_b:
         net30 = _add_measurements_af(pn.case30(), 5, 112, .0, .0, .0)
 
-    if bus18:
+    if bus18_b:
         s_path = str(os.getenv("PATH_0005"))
-        create_random_grid_random_estimation(s_path, 1000, 112, .01, .01, .01)
+        create_random_18_bus_grid_random_estimation(s_path, 1000, 112, .01, .01, .01)
         evaluation_af(s_path)
         evaluation_vp(s_path)
 
+    if simbench_b:
+        # codes = [
+        #     "1-MV-semiurb--0-sw",
+        #     "1-MV-rural--0-sw",
+        #     "1-MV-comm--0-sw",
+        #     "1-MVLV-semiurb-all-0-sw",
+        #     "1-MVLV-rural-all-0-sw",
+        #     "1-MV-urban--0-sw"
+        # ]
+        # for code in codes:
+        #     net = sb.get_simbench_net(code)
+        #     if len(net.load):
+        #         print(f"{code} load: {net.load.type.dropna().unique()}")
+        #         print(f"{code} load: {len(net.bus)}")
+        #
+        #     if len(net.sgen):
+        #         print(f"{code} sgen: {net.sgen.type.dropna().unique()}")
+        #         print(f"{code} load: {len(net.bus)}")
+        #
+        #     if len(net.gen):
+        #         print(f"{code} gen: {net.gen.type.dropna().unique()}")
+        #         print(f"{code} load: {len(net.bus)}")
+
+        net_sb = sb.get_simbench_net("1-MV-semiurb--0-sw load")
+        net_sb.load["type"] = net_sb.load["type"].fillna("res")
+        runpp(net_sb)
+        se_dc = estimate(net_sb, algorithm="af-lp", wlav=True, with_ortools=False)
+        print(f"net_sb bus = {net_sb.bus}")
     print(f"you shall not pass")
