@@ -170,6 +170,7 @@ Further Algorithms and Estimators
     :maxdepth: 1
 
     estimation/lp
+    estimation/opt
 
 Since Pandapower 2.0.1 further algorithms and estimators (robust estimators) are available for the state estimation module, these include:
 
@@ -180,7 +181,7 @@ Since Pandapower 2.0.1 further algorithms and estimators (robust estimators) are
 +-------------------------------------+----------------------+
 | wls with zero injection constraints |                      |
 +-------------------------------------+----------------------+
-| lp                                  | lav                  |
+| lp                                  |                      |
 +-------------------------------------+----------------------+
 | irwls                               | wls, shgm            |
 +-------------------------------------+----------------------+

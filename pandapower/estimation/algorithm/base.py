@@ -3,6 +3,7 @@
 
 import numpy as np
 import pandas as pd
+from typing import Literal
 
 from scipy.sparse import csr_matrix, vstack, hstack
 from scipy.sparse.linalg import spsolve, norm, inv
@@ -17,6 +18,8 @@ from pandapower.pypower.idx_bus import bus_cols
 import logging
 std_logger = logging.getLogger(__name__)
 std_logger.setLevel(logging.DEBUG)
+
+ESTIMATOR_SE_TYPES = Literal["wls", "smgm"]
 
 __all__ = ["WLSAlgorithm", "WLSZeroInjectionConstraintsAlgorithm", "IRWLSAlgorithm"]
 
@@ -345,7 +348,31 @@ class WLSZeroInjectionConstraintsAlgorithm(BaseAlgorithm):
 
 
 class IRWLSAlgorithm(BaseAlgorithm):
-    def estimate(self, eppci: ExtendedPPCI, estimator="wls", **kwargs):
+    def estimate(self, eppci: ExtendedPPCI, estimator: ESTIMATOR_SE_TYPES = "wls", **kwargs) -> ExtendedPPCI | bool:
+        """
+        Perform state estimation using an Iteratively Reweighted Least Squares (IRWLS) algorithm.
+
+        The method iteratively updates the state vector E by solving a sequence of weighted least-squares problems. In
+        each iteration, measurement residuals, the Jacobian matrix, and a (possibly robust) weighting matrix are
+        computed via the selected estimator (e.g. WLS or SHGM). The iterations stop when the maximum state update falls
+        below the configured tolerance or when the maximum number of iterations is reached.
+
+        Arguments:
+            eppci: Extended power system case input (ExtendedPPCI) containing the current state vector, measurement
+                data, and model information.
+            estimator: Type of estimator to use for building the IRWLS matrices. Typically one of:
+                - "WLS": Weighted Least Squares
+                - "SHGM": Robust estimator based on SHGM
+            **kwargs: Additional keyword arguments passed to the underlying estimator implementation returned by
+                ``get_estimator`` (e.g. tuning parameters for robust estimation).
+
+        Returns:
+            Updated ``ExtendedPPCI`` instance with the estimated state if the algorithm finishes without numerical
+            errors. ``False`` if a numerical linear algebra error occurs during the solution of the linear system
+            (e.g. singular gain matrix).
+
+        """
+
         self.initialize(eppci)
 
         # matrix calculation object
@@ -381,7 +408,7 @@ class IRWLSAlgorithm(BaseAlgorithm):
                                   "Check and change the measurement set.")
                 return False
 
-        # check if the estimation is successfull
+        # check if the estimation is successfully
         self.check_result(current_error, cur_it)
         # update V/delta
         return eppci

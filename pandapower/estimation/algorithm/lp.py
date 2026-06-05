@@ -372,8 +372,8 @@ class LPAlgorithm(BaseAlgorithm):
         Returns:
             a tuple with
 
-            * :math:`\Delta E`: State update vector with shape ``(n,)``
-            * ``objective_value``: Final value of the LP objective function.
+                * :math:`\Delta E`: State update vector with shape ``(n,)``
+                * ``objective_value``: Final value of the LP objective function.
         """
         # m number of measurements len(eppci.z) -> z element R^{m}, n number of state variable len(eppci.E)
         m, n = H.shape

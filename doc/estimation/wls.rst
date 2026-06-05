@@ -8,7 +8,7 @@ Weighted Least Squares Algorithm
 .. autofunction:: pandapower.estimation.algorithm.base.WLSAlgorithm.estimate
 
 
-.. .. autoclass:: pandapower.estimation.algorithm.base.AFWLSAlgorithm
-
-.. .. autofunction:: pandapower.estimation.algorithm.base.AFWLSAlgorithm.__init__
-.. .. autofunction:: pandapower.estimation.algorithm.base.AFWLSAlgorithm.estimate
+Iteratively Reweighted Least Squares (IRWLS)
+============================================
+.. autoclass:: pandapower.estimation.algorithm.base.IRWLSAlgorithm
+.. autofunction:: pandapower.estimation.algorithm.base.IRWLSAlgorithm.estimate

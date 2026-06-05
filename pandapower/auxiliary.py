@@ -39,6 +39,7 @@ from typing import (
     TypeVar,
     overload,
     Final,
+    TYPE_CHECKING
 )
 
 import numpy as np
@@ -74,6 +75,10 @@ try:
 except ImportError:
     geopandas_available = False
 
+if TYPE_CHECKING:
+    from pandapower.estimation.state_estimation import ALGORITHM_SE
+    from pandapower.estimation.algorithm.base import ESTIMATOR_SE_TYPES
+    from pandapower.estimation.algorithm.lp import LinprogMethod
 
 PyPowerNetwork = dict[str, Any]
 NumpyDType = TypeVar("NumpyDType", bound=np.generic, covariant=True)
@@ -1539,6 +1544,43 @@ def _add_sc_options(
     _add_options(net, options)
 
 
+def _add_se_options(
+        net: pandapowerNet,
+        algorithm: "ALGORITHM_SE" = "wls",
+        init: str = "flat",
+        tolerance: float = 1e-6,
+        maximum_iterations: int = 50,
+        zero_injection="aux_bus",
+        fuse_buses_with_bb_switch="all",
+        debug_mode: bool = False,
+        estimator: ESTIMATOR_SE_TYPES = "wls",
+        linprog_method: "LinprogMethod" = "highs",
+        wlav: bool = False,
+        with_ortools: bool = True,
+        af_init_value: float | np.ndarray = .5,
+        af_target_value: float | np.ndarray | None = None,
+        af_std_value: float | np.ndarray | None = None,
+) -> None:
+
+    options = {
+        "algorithm": algorithm,
+        "init": init,
+        "tolerance": tolerance,
+        "maximum_iterations": maximum_iterations,
+        "zero_injection": zero_injection,
+        "fuse_buses_with_bb_switch": fuse_buses_with_bb_switch,
+        "debug_mode": debug_mode,
+        "estimator": estimator,
+        "linprog_method": linprog_method,
+        "wlav": wlav,
+        "with_ortools": with_ortools,
+        "af_init_value": af_init_value,
+        "af_target_value": af_target_value,
+        "af_std_value": af_std_value
+    }
+    _add_options(net, options)
+
+
 def _add_options(net: pandapowerNet, options: dict[str, Any]) -> None:
     # double_parameters = set(net.__internal_options.keys()) & set(options.keys())
     double_parameters = set(net._options.keys()) & set(options.keys())
@@ -1548,9 +1590,6 @@ def _add_options(net: pandapowerNet, options: dict[str, Any]) -> None:
             "twice: %s" % double_parameters)
     # net.__internal_options.update(options)
     net._options.update(options)
-
-
-# ToDo: _add_se_options()
 
 
 def get_vsc_stacked_names(elements: NDArray):
@@ -2342,7 +2381,7 @@ def _init_runse_options(
     switch_rx_ratio: int = 2,
     **kwargs: Any,
 ) -> None:
-
+    # ToDo: add here the state estimation parameter from _add_se_options()
     net._options = {}
     _add_ppc_options(net, calculate_voltage_angles=calculate_voltage_angles,
                      trafo_model=trafo_model, check_connectivity=check_connectivity,
@@ -2352,6 +2391,20 @@ def _init_runse_options(
     _add_pf_options(net, tolerance_mva=1e-8, trafo_loading="power",
                     numba=True, ac=True, algorithm="nr", max_iteration="auto",
                     only_v_results=False)
+    # _add_se_options(
+    #     net,
+    #     algorithm= "wls",
+    #     init="flat", tolerance=1e-6,
+    #     maximum_iterations=50, zero_injection="aux_bus",
+    #     fuse_buses_with_bb_switch="all",
+    #     debug_mode=False,
+    #     estimator="wls",
+    #     linprog_method="highs",
+    #     wlav=False,
+    #     with_ortools=True,
+    #     af_init_value=.5,
+    #     af_target_value=None,
+    #     af_std_value=None)
 
 
 def _internal_stored(net: pandapowerNet, ac: bool = True) -> bool:

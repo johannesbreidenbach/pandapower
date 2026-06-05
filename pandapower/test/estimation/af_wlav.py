@@ -407,7 +407,7 @@ def _create_18_bus_grid(
         # Wind:
         #     20% - 40%
         #
-        var_l_res = 0.5 + 0.3 * np.random.rand()
+        var_l_res = 0.5 + 0.3 * np.random.rand()  # ToDo: create other scaling values to get better behavior
         var_l_com = 0.3 + 0.3 * np.random.rand()
         var_g_pv = 0.3 + 0.1 * np.random.rand()
         var_g_wind = 0.2 + 0.2 * np.random.rand()

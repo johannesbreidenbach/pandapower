@@ -28,28 +28,26 @@ ALGORITHM_MAPPING = {"wls": WLSAlgorithm,
                      "lp": LPAlgorithm,
                      "af-wls": WLSAlgorithm,
                      "af-lp": LPAlgorithm}
-Algorithms = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
-ALLOWED_OPT_VAR = {
-    "a",
-    "opt_method",
-    "estimator",
-    "linprog_method",
-    "wlav",
-    "with_ortools",
-    "af_init_value",
-    "af_target_value",
-    "af_std_value"
+ALGORITHM_SE = Literal["wls", "wls_with_zero_constraint", "opt", "irwls", "lp", "af-wls", "af-lp"]
+OPT_VAR_DEFAULTS = {
+    "estimator": "wls",
+    "linprog_method": "highs",
+    "wlav": False,
+    "with_ortools": True,
+    "af_init_value": .5,
+    "af_target_value": None,
+    "af_std_value": None
 }
 
 
 def estimate(
         net: pandapowerNet,
-        algorithm: Algorithms ="wls",
+        algorithm: ALGORITHM_SE ="wls",
         init: str = "flat",
         tolerance: float = 1e-6,
         maximum_iterations: int = 50,
-        zero_injection="aux_bus",
-        fuse_buses_with_bb_switch="all",
+        zero_injection = "aux_bus",
+        fuse_buses_with_bb_switch = "all",
         debug_mode: bool = False,
         **opt_vars
 ) -> dict[str, object]:
@@ -107,8 +105,11 @@ def estimate(
         debug_mode (bool):
 
     Keyword Args:
+        estimator (Literal["wls", "smgm"]): Used with ``algorithm="irwls"``.
         linprog_method (Literal["highs", "highs-ds", "highs-ipm"]): supported for algorithm='lav'
         wlav (bool): Perform LAV with weights.
+        with_ortools (bool):
+            Alternative solver to scipy for (W)LAV using `OR-Tools solver <https://github.com/google/or-tools>`_
         af_init_value (float | np.ndarray):
             Initial values for the allocation factors in E vector. One Value for all or an array for explicite. The
             value 0.5 is default.
@@ -123,9 +124,21 @@ def estimate(
             estimation: smaller values imply a stronger pull toward `af_target_value`, larger values make the
             prior weaker. Specific value 0.15 used in a grid-operator use case.
 
-
     Returns:
-        bool: Was the state estimation successful?
+        dict:
+            Dictionary with state estimation results. The exact content depends on the chosen algorithm. For
+            ``algorithm`` in ``["wls", "af-wls", "lp", "af-lp"]`` the dictionary contains:
+
+                - ``"success"`` (bool): Flag indicating whether the state estimation finished successfully.
+                - ``"num_iterations"`` (int): Number of iterations performed by the solver.
+                - ``"objective_function_value"`` (float): Final value of the objective function.
+                - ``"allocation_factors"`` (DataFrame): Estimated allocation factors (only meaningful for AF-based
+                                                        algorithms).
+                - ``"time"`` (str): Timestamp of the estimation in the format ``"YYYY-MM-DD HH:MM:SS"``.
+
+            For all other algorithms the dictionary contains only:
+
+                - ``"success"`` (bool): Flag indicating whether the state estimation finished successfully.
     """
     if algorithm not in ALGORITHM_MAPPING:
         raise UserWarning("Algorithm {} is not a valid estimator".format(algorithm))
@@ -301,7 +314,7 @@ class StateEstimation:
         """
         # check if all parameter are allowed
         for var_name in opt_vars.keys():
-            if var_name not in ALLOWED_OPT_VAR:
+            if var_name not in OPT_VAR_DEFAULTS:
                 self.logger.warning("Caution! %s is not allowed as parameter" % var_name \
                                     + " for estimate and will be ignored!")
 
@@ -318,9 +331,9 @@ class StateEstimation:
                 bus_to_be_fused = fuse_buses_with_bb_switch
             set_bb_switch_impedance(self.net, bus_to_be_fused)  # runpp() performed
 
-        af_init_value = opt_vars.get("af_init_value", 0.5)  # set value to default 0.5 if no values are given
-        af_target_value = opt_vars.get("af_target_value", None)
-        af_std_value = opt_vars.get("af_std_value", None)
+        af_init_value = opt_vars.get("af_init_value", OPT_VAR_DEFAULTS["af_init_value"])
+        af_target_value = opt_vars.get("af_target_value", OPT_VAR_DEFAULTS["af_target_value"])
+        af_std_value = opt_vars.get("af_std_value", OPT_VAR_DEFAULTS["af_std_value"])
         if (af_target_value is None) != (af_std_value is None):
             raise ValueError("af_target_value and af_std_value are both None or both not None.")
         self.net, self.ppc, self.eppci = pp2eppci(self.net,
