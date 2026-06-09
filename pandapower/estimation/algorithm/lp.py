@@ -76,7 +76,7 @@ class LPAlgorithm(BaseAlgorithm):
 
         Let :math:`w_i` be the weight and :math:`r_i` be the residual or measurement error of i-th element. In each
         iteration, a linear program is solved via :func:`scipy.optimize.linprog` to obtain the state update
-        :math:`\Delta E`. The state vector :math:`E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}]^\top`
+        :math:`\Delta E`. The state vector :math:`E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-buses}}]^\top`
         inside ``eppci`` is updated in-place.
 
         Parameters:
@@ -126,7 +126,7 @@ class LPAlgorithm(BaseAlgorithm):
                 r = LPAlgorithm._to_dense_auto(sem.create_rx(E))
                 # create Jacobian matrix convert to csr -> zeros not save -> better for lager grids -> less RAM
                 H_raw = sem.create_hx_jacobian(E)  # create jacobian matrix from data set
-                H = H_raw.tocsr() if issparse(H_raw) else csr_matrix(H_raw)  #
+                H = H_raw.tocsr() if issparse(H_raw) else csr_matrix(H_raw)  # H_raw has to be a SciPy-CSR-Matrix
                 # m number of measurements -> z element R^{m}, n number of state variable
                 m, n = H.shape
 
@@ -154,10 +154,10 @@ class LPAlgorithm(BaseAlgorithm):
                 current_error = float(np.max(np.abs(d_E)))
 
                 # Optional step limiting:
-                # This factor was derived from the 50Hz project, where a flat start in large-scale grids caused
+                # This factor was derived from a project, where a flat start in large-scale grids caused
                 # excessively large state updates (dE). Limiting the step to 0.35 helps prevent those large jumps during
                 # the first iterations.
-                if current_error > 0.35:  # 50Hz project heuristic to limit excessive state updates
+                if current_error > 0.35:  # project heuristic to limit excessive state updates
                     d_E = d_E * 0.35 / current_error
 
                 # Update state vector
@@ -228,7 +228,7 @@ class LPAlgorithm(BaseAlgorithm):
         with:
 
         .. math::
-            E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}, \alpha_{i}]^\top
+            E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-buses}}, \alpha_{i}]^\top
 
         For standard state variables, the state update ``dE`` = :math:`\Delta E` is unconstrained. If allocation factors are present, they
         are assumed to be the last :math:`i` ``num_clusters`` entries of ``E`` = :math:`E` and are constrained such that:
@@ -251,7 +251,7 @@ class LPAlgorithm(BaseAlgorithm):
             num_clusters:
                 Number of different clusters in power grid.
             E:
-                current state vector with :math:`E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}, \alpha_{i}]`
+                current state vector with :math:`E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-buses}}, \alpha_{i}]`
                 the values :math:`\alpha_{i}` are existing if the allocation factors are used.
         Returns:
             Bounds list for ``scipy.optimize.linprog``.
@@ -355,7 +355,7 @@ class LPAlgorithm(BaseAlgorithm):
         power systems. For the allocation factors :math:`E` is defined as:
 
         .. math::
-            E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-busses}}, \alpha_{i}]^\top
+            E = [\theta_{\mathrm{non-slack}}, V_{\mathrm{all-buses}}, \alpha_{i}]^\top
 
         with :math:`i` number of clusters.
 

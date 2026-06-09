@@ -5,7 +5,6 @@ import copy
 import numpy as np
 import pandas as pd
 import os
-import pickle
 import simbench as sb
 
 import plotly.graph_objects as go
@@ -28,16 +27,38 @@ from pandapower.test.estimation.test_lav_estimation import _r
 # begin functions
 def _add_measurements_af(
         net_base: pandapowerNet,
+        seed_m: int | None = None,
         measurement_interval: int = 1,
-        seed: int = 112,
         rv: float = .01,
         rp: float = .03,
         rq: float = .03
-) -> pandapowerNet:
-    # 1. load mv oberrhein
-    np.random.seed(seed)
+) -> None:
+    """
+    Add measurements to test gird for state estimation with allocation factors.
 
-    runpp(net_base)
+    With the parameter ``measurement_interval`` various properties can be set. Fully observable (1),
+    non-observable (>1). The measurement uncertainty can be set with ``rv, rp, rq`` for voltage, active and reactive
+    power. To the net will add measurements which comes from powerflow calculation results with statistic uncertainties.
+
+    Arguments:
+        net_base: net with or without load flow calculations can be imported.
+        seed_m: Attention if None, no seed will be used different to normal use case.
+        measurement_interval:
+            Integer greater than or equal to 1. Measurements are added to every `measurement_interval`-th bus (according
+            to the bus order in `net_base.res_bus`). Higher values result in fewer measurements. The allocation is
+            systematic and not random.
+        rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
+        rp: standard deviation to apply a multiplicative perturbation to quantities for active power
+        rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
+
+    Returns:
+        None
+    """
+    if seed_m is not None:
+        np.random.seed(seed_m)
+
+    if not net_base.converged:
+        runpp(net_base)
 
     # 2. create measurements ONCE on the base network
     for i, (bus, row) in enumerate(net_base.res_bus.iterrows()):
@@ -68,7 +89,177 @@ def _add_measurements_af(
             std_dev=max(.001, abs(rq * row.q_mvar)),
             element=int(bus)
         )
-    return net_base
+
+
+def _fill_measurement_values_from_powerflow(
+    net: pandapowerNet,
+    seed_m: int | None = None,
+    rv: float = 0.01,
+    ri: float = 0.01,
+    rp: float = 0.03,
+    rq: float = 0.03
+) -> None:
+    """
+    Fill existing pandapower measurements with values from power flow results.
+
+    Existing entries in net.measurement are not recreated. Only `value` and `std_dev` are updated. The measurement
+    values are taken from the corresponding result tables and multiplied by `_r(...)` to add measurement uncertainty.
+
+    Parameters:
+        net: net with or without load flow calculations can be imported.
+        seed_m: Attention if None, no seed will be used different to normal use case
+        rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
+        ri: standard deviation to apply a multiplicative perturbation to quantities for current
+        rp: standard deviation to apply a multiplicative perturbation to quantities for active power
+        rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
+
+    Returns: None
+    """
+
+    if seed_m is not None:
+        np.random.seed(seed_m)
+
+    if not net.converged or net.res_bus.empty:
+        runpp(net)
+
+    for idx, meas in net.measurement.iterrows():
+        meas_type = meas["measurement_type"]
+        element_type = meas["element_type"]
+        element = int(meas["element"])
+        side = meas.get("side", None)
+
+        value: float | None = None
+        std_dev: float | None = None
+
+        # --- bus measurements ---
+        if element_type == "bus":
+            if meas_type == "v":
+                base_value = float(net.res_bus.at[element, "vm_pu"])
+                value = base_value * _r(rv)
+                std_dev = max(0.001, abs(rv * base_value))
+
+            elif meas_type == "p":
+                base_value = float(net.res_bus.at[element, "p_mw"])
+                value = base_value * _r(rp)
+                std_dev = max(0.001, abs(rp * base_value))
+
+            elif meas_type == "q":
+                base_value = float(net.res_bus.at[element, "q_mvar"])
+                value = base_value * _r(rq)
+                std_dev = max(0.001, abs(rq * base_value))
+
+        # --- line measurements ---
+        elif element_type == "line":
+            if side == "from":
+                prefix = "from"
+            elif side == "to":
+                prefix = "to"
+            else:
+                raise ValueError(f"Invalid or missing side for line measurement at index {idx}: {side}")
+
+            if meas_type == "p":
+                base_value = float(net.res_line.at[element, f"p_{prefix}_mw"])
+                value = base_value * _r(rp)
+                std_dev = max(0.001, abs(rp * base_value))
+
+            elif meas_type == "q":
+                base_value = float(net.res_line.at[element, f"q_{prefix}_mvar"])
+                value = base_value * _r(rq)
+                std_dev = max(0.001, abs(rq * base_value))
+
+            elif meas_type == "i":
+                base_value = float(net.res_line.at[element, f"i_{prefix}_ka"])
+                value = base_value * _r(ri)
+                std_dev = max(0.001, abs(ri * base_value))
+
+        # --- transformer measurements ---
+        elif element_type == "trafo":
+            if side not in ["hv", "lv"]:
+                raise ValueError(f"Invalid or missing side for trafo measurement at index {idx}: {side}")
+
+            if meas_type == "p":
+                base_value = float(net.res_trafo.at[element, f"p_{side}_mw"])
+                value = base_value * _r(rp)
+                std_dev = max(0.001, abs(rp * base_value))
+
+            elif meas_type == "q":
+                base_value = float(net.res_trafo.at[element, f"q_{side}_mvar"])
+                value = base_value * _r(rq)
+                std_dev = max(0.001, abs(rq * base_value))
+
+            elif meas_type == "i":
+                base_value = float(net.res_trafo.at[element, f"i_{side}_ka"])
+                value = base_value * _r(ri)
+                std_dev = max(0.001, abs(ri * base_value))
+
+        if value is not None:
+            net.measurement.at[idx, "value"] = value
+            net.measurement.at[idx, "std_dev"] = std_dev
+
+
+def _create_simbench_mc_case(
+    net,
+    seed_pf: int | None = None,
+    load_range: tuple[float, float] = (.5, .8),
+    sgen_range: tuple[float, float] = (.3, .5),
+) -> dict[str, dict]:
+    """
+    Generate a random operating point for a SimBench network and perform a power flow calculation.
+
+    A copy of the input network is created and the active and reactive powers of all loads and static generators are
+    scaled by uniformly distributed random factors. The resulting network represents the "true" operating state for the
+    current Monte Carlo iteration.
+
+    After the power flow calculation, the result tables (``res_*``) of the perturbed network are copied back to the
+    original network. Consequently, the original network retains its nominal load and generation values while containing
+    the power flow results of the randomly perturbed operating point. This enables state estimation with nominal values
+    and measurements derived from varying operating conditions.
+
+    Parameters:
+        net: SimBench network containing the nominal load and generation values.
+        seed_pf: Attention if None, no seed will be used different to normal use case.
+        load_range: Lower and upper bounds of the uniformly distributed scaling factors applied to loads.
+        sgen_range: Lower and upper bounds of the uniformly distributed scaling factors applied to sgens.
+
+    Returns:
+        Scaling parameters for loads and sgens.
+    """
+
+    # ToDo: Check what the scaling factor in load, sgen, gen does
+    if seed_pf is not None:
+        np.random.seed(seed_pf)
+
+    net_pf = copy.deepcopy(net)
+
+    k = {
+        "load": {},
+        "sgen": {},
+    }
+
+    # scale loads in net_pf
+    for idx in net_pf.load.index:
+        factor = np.random.uniform(*load_range)
+        k["load"][idx] = factor
+
+        net_pf.load.at[idx, "p_mw"] *= factor
+        net_pf.load.at[idx, "q_mvar"] *= factor
+
+    # sclae sgen in net_pf
+    for idx in net_pf.sgen.index:
+        factor = np.random.uniform(*sgen_range)
+        k["sgen"][idx] = factor
+
+        net_pf.sgen.at[idx, "p_mw"] *= factor
+        net_pf.sgen.at[idx, "q_mvar"] *= factor
+
+    # run powerflow with scaled values
+    runpp(net_pf)
+
+    # copy results from powerflow to net for state estimation
+    for key in net_pf.keys():
+        if key.startswith("res_"):
+            net[key] = net_pf[key].copy(deep=True)
+    return k
 
 
 def _create_measurement_18_bus_grid(
@@ -396,7 +587,7 @@ def _create_18_bus_grid(
     # Create loads and generators at each bus
     # =========================================================================
     for idx in range(17):
-        bus = buses[idx + 1] # busses 2-18
+        bus = buses[idx + 1] # buses 2-18
         # Random operating-point scaling factors
         #
         # Residential load:
@@ -537,7 +728,7 @@ def _create_18_bus_grid(
     return net_se, k_dc
 
 
-def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save_path: str = ".") -> None:
+def _calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save_path: str = ".") -> None:
     """
     un three different allocation-factor-based state estimation methods (AF-WLS, AF-WLAV, AF-LAV) for a specific power
     grid and return bus voltages, angles, deviations and the allocation factors. The power grid is unobservable.
@@ -581,7 +772,7 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
         print(f"file {af_lav_file} already exists")
     else:
         net_af_lav = copy.deepcopy(net_base)
-        af_lav = estimate(net_af_lav, algorithm="af-lp", wlav=False, with_ortools=False)
+        af_lav = estimate(net_af_lav, algorithm="af-lp", wlav=False, with_ortools=True)
         af_lav["allocation_factors"].index = ["AF-LAV"]  # set index for saving data
         if not af_lav["success"]:
             failures.append(f"AF-LAV, {num_it}, failed")
@@ -593,7 +784,7 @@ def calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, save
         print(f"file {af_wlav_file} already exists")
     else:
         net_af_wlav = copy.deepcopy(net_base)
-        af_wlav = estimate(net_af_wlav, algorithm="af-lp", wlav=True, with_ortools=False)
+        af_wlav = estimate(net_af_wlav, algorithm="af-lp", wlav=True, with_ortools=True)
         af_wlav["allocation_factors"].index = ["AF-WLAV"]  # set index for saving data
         if not af_wlav["success"]:
             failures.append(f"AF-WLAV, {num_it}, failed")
@@ -639,7 +830,60 @@ def create_random_18_bus_grid_random_estimation(
         name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
         net18, k = _create_18_bus_grid()
         _create_measurement_18_bus_grid(net=net18, rv=rv, rp=rp, rq=rq)  #
-        calc_different_se(net18, failures, name_str, path)
+        _calc_different_se(net18, failures, name_str, path)
+
+    # if failures is not empty the list will save as txt file.
+    if not failures:
+        print("List is empty, very good")
+    else:
+        print(f"List is not empty: {failures}")
+        with open(os.path.join(path, "failures.txt"), "w", encoding="utf-8") as f:
+            for failure in failures:
+                f.write(failure + "\n")
+
+
+def create_random_estimations_simbench(
+        net: pandapowerNet,
+        path: str = ".",
+        itr: int = 1000,
+        seed: int = 112,
+        seed_pf: int | None = None,
+        seed_m: int | None = None,
+        rv: float = .01,
+        ri: float = .01,
+        rp: float = .03,
+        rq: float = .03
+) -> None:
+    """
+    Every iteration applies random perturbations to the load and generation values used in the power flow calculation
+    and, in addition, to the measurement values used for state estimation.
+
+    Parameters:
+        net: Power grid with powerflow calculation results and without measurements.
+        path: Place where grid and allocation factors will be saved.
+        itr: Number of iterations.
+        seed:
+            Optional random seed for reproducible simulations. If ``None``, random values are generated for every call.
+        seed_pf:
+            Parameter for :func:`_create_simbench_mc_case`. Attention if None, no seed will be used different to normal use
+            case.
+        seed_m:
+            Parameter for :func:`_add_measurements_af`. Attention if None, no seed will be used different to normal use
+            case.
+        rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
+        ri: standard deviation to apply a multiplicative perturbation to quantities for current
+        rp: standard deviation to apply a multiplicative perturbation to quantities for active power
+        rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
+    Returns: None
+    """
+
+    np.random.seed(seed)
+    failures: list = []  # The list contains information about the final status of the state estimation
+    for i in range(itr):
+        name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
+        k = _create_simbench_mc_case(net, seed_pf)
+        _fill_measurement_values_from_powerflow(net, seed_m, rv, ri, rp, rq)
+        _calc_different_se(net, failures, name_str, path)
 
     # if failures is not empty the list will save as txt file.
     if not failures:
@@ -1077,13 +1321,19 @@ if __name__ == "__main__":
 
     if mv_b:
         # rv=.01, rp=.03, rq=.03
-        net_mv = _add_measurements_af(pn.mv_oberrhein(),15, 112, .0, .0, .0)
+        net_mv = pn.mv_oberrhein()
+        runpp(net_mv)
+        _add_measurements_af(net_mv, 112,15, .0, .0, .0)
 
     if ieee14_b:
-        net14 = _add_measurements_af(pn.case14(), 2, 112, .0, .0, .0)
+        net14 = pn.case14()
+        runpp(net14)
+        _add_measurements_af(net14, 112, 2, .0, .0, .0)
 
     if ieee30_b:
-        net30 = _add_measurements_af(pn.case30(), 5, 112, .0, .0, .0)
+        net30 = pn.case30()
+        runpp(net30)
+        _add_measurements_af(net30, 112, 5, .0, .0, .0)
 
     if bus18_b:
         s_path = str(os.getenv("PATH_0005"))
@@ -1092,31 +1342,24 @@ if __name__ == "__main__":
         evaluation_vp(s_path)
 
     if simbench_b:
-        # codes = [
-        #     "1-MV-semiurb--0-sw",
-        #     "1-MV-rural--0-sw",
-        #     "1-MV-comm--0-sw",
-        #     "1-MVLV-semiurb-all-0-sw",
-        #     "1-MVLV-rural-all-0-sw",
-        #     "1-MV-urban--0-sw"
-        # ]
-        # for code in codes:
-        #     net = sb.get_simbench_net(code)
-        #     if len(net.load):
-        #         print(f"{code} load: {net.load.type.dropna().unique()}")
-        #         print(f"{code} load: {len(net.bus)}")
-        #
-        #     if len(net.sgen):
-        #         print(f"{code} sgen: {net.sgen.type.dropna().unique()}")
-        #         print(f"{code} load: {len(net.bus)}")
-        #
-        #     if len(net.gen):
-        #         print(f"{code} gen: {net.gen.type.dropna().unique()}")
-        #         print(f"{code} load: {len(net.bus)}")
+        sb_path = str(os.getenv("PATH_SB"))
+        sb_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]
+        for sb_grid in sb_grid_ls:
+            s_path = os.path.join(sb_path, sb_grid)
+            os.makedirs(s_path, exist_ok=True)
 
-        net_sb = sb.get_simbench_net("1-MV-semiurb--0-sw load")
-        net_sb.load["type"] = net_sb.load["type"].fillna("res")
-        runpp(net_sb)
-        se_dc = estimate(net_sb, algorithm="af-lp", wlav=True, with_ortools=False)
-        print(f"net_sb bus = {net_sb.bus}")
+            net_sb = sb.get_simbench_net(sb_grid)
+            net_sb.load["type"] = net_sb.load["type"].fillna("residential")
+            # print(
+            #     f"Grid: {sb_grid}\n"
+            #     f"Allocation Factors Load: {net_sb.load["type"].unique()}\n"
+            #     f"Allocation Factors Generator: {net_sb.gen["type"].unique()}\n"
+            #     f"Allocation Factors Static Generator{net_sb.sgen["type"].unique()}\n"
+            #     f"Number of buses: {len(net_sb.bus)}\n"
+            # )
+            create_random_estimations_simbench(
+                net_sb, s_path, 1000, 112, None, None, .01, .01, .01, .01
+            )
+            # net_sb.measurement.drop(net_sb.measurement.index, inplace=True)
+            print(f"finished: {sb_grid}")
     print(f"you shall not pass")
