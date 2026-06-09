@@ -6,6 +6,10 @@ import numpy as np
 import pandas as pd
 import os
 import simbench as sb
+import time
+
+from datetime import timedelta
+from tqdm import tqdm
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -402,7 +406,11 @@ def _create_measurement_18_bus_grid(
 def _create_18_bus_grid(
         base_mva: float = 10.0,
         slack_v: float = 1.0,
-        slack_va_degree: float = 0.0
+        slack_va_degree: float = 0.0,
+        load_range: tuple[float, float] = (.5, .8),
+        com_range: tuple[float, float] = (.3, .6),
+        pv_range: tuple[float, float] = (.3, .4),
+        wind_range: tuple[float, float] = (.2, .4)
 ) -> tuple[pandapowerNet, dict[str, np.ndarray]]:
     """
     Create the 18-bus radial distribution network from the original MATLAB implementation and run a power flow
@@ -424,10 +432,12 @@ def _create_18_bus_grid(
 
     Parameters:
         base_mva: Base apparent power of the system in MVA. Corresponds to ``Sb`` in the MATLAB implementation.
-
         slack_v: Voltage magnitude of the slack bus in per-unit.
-
         slack_va_degree: Voltage angle of the slack bus in degrees.
+        load_range: Range of scaling factor (uniformly distributed) for load (residential load)
+        com_range: Range of scaling factor (uniformly distributed) for load (commercial load)
+        pv_range: Range of scaling factor (uniformly distributed) for sgne (PV generation)
+        wind_range: Range of scaling factor (uniformly distributed) for wind (wind generation)
 
     Returns:
         Return a pandapower net with the results from the powerflow calculation and the nominal loads and powers for
@@ -599,10 +609,10 @@ def _create_18_bus_grid(
         # Wind:
         #     20% - 40%
         #
-        var_l_res = 0.5 + 0.3 * np.random.rand()  # ToDo: create other scaling values to get better behavior
-        var_l_com = 0.3 + 0.3 * np.random.rand()
-        var_g_pv = 0.3 + 0.1 * np.random.rand()
-        var_g_wind = 0.2 + 0.2 * np.random.rand()
+        var_l_res = np.random.uniform(*load_range)  # ToDo: create other scaling values to get better behavior
+        var_l_com = np.random.uniform(*com_range)
+        var_g_pv = np.random.uniform(*pv_range)
+        var_g_wind = np.random.uniform(*wind_range)
 
         k_dc["KL_res"][idx] = var_l_res
         k_dc["KL_com"][idx] = var_l_com
@@ -772,7 +782,7 @@ def _calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, sav
         print(f"file {af_lav_file} already exists")
     else:
         net_af_lav = copy.deepcopy(net_base)
-        af_lav = estimate(net_af_lav, algorithm="af-lp", wlav=False, with_ortools=True)
+        af_lav = estimate(net_af_lav, algorithm="af-lp", wlav=False, with_ortools=False)
         af_lav["allocation_factors"].index = ["AF-LAV"]  # set index for saving data
         if not af_lav["success"]:
             failures.append(f"AF-LAV, {num_it}, failed")
@@ -784,7 +794,7 @@ def _calc_different_se(net_base: pandapowerNet, failures: list, num_it: str, sav
         print(f"file {af_wlav_file} already exists")
     else:
         net_af_wlav = copy.deepcopy(net_base)
-        af_wlav = estimate(net_af_wlav, algorithm="af-lp", wlav=True, with_ortools=True)
+        af_wlav = estimate(net_af_wlav, algorithm="af-lp", wlav=True, with_ortools=False)
         af_wlav["allocation_factors"].index = ["AF-WLAV"]  # set index for saving data
         if not af_wlav["success"]:
             failures.append(f"AF-WLAV, {num_it}, failed")
@@ -807,7 +817,11 @@ def create_random_18_bus_grid_random_estimation(
         seed: int = 112,
         rv: float = .01,
         rp: float = .03,
-        rq: float = .03
+        rq: float = .03,
+        load_range: tuple[float, float] = (.5, .8),
+        com_range: tuple[float, float] = (.3, .6),
+        pv_range: tuple[float, float] = (.3, .4),
+        wind_range: tuple[float, float] = (.2, .4)
 ) -> None:
     """
     Every iteration applies random perturbations to the load and generation values used in the power flow calculation
@@ -821,14 +835,24 @@ def create_random_18_bus_grid_random_estimation(
         rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
         rp: standard deviation to apply a multiplicative perturbation to quantities for active power
         rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
+        load_range:
+            Range of scaling factor (uniformly distributed) for load (residential load) :func:`_create_18_bus_grid`
+        com_range:
+            Range of scaling factor (uniformly distributed) for load (commercial load) :func:`_create_18_bus_grid`
+        pv_range:
+            Range of scaling factor (uniformly distributed) for sgne (PV generation) :func:`_create_18_bus_grid`
+        wind_range:
+            Range of scaling factor (uniformly distributed) for wind (wind generation) :func:`_create_18_bus_grid`
     Returns: None
     """
 
     np.random.seed(seed)
     failures: list = []  # The list contains information about the final status of the state estimation
-    for i in range(itr):
+    for i in tqdm(range(itr)):
         name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
-        net18, k = _create_18_bus_grid()
+        net18, k = _create_18_bus_grid(
+            load_range=load_range, com_range=com_range, pv_range=pv_range, wind_range=wind_range
+        )
         _create_measurement_18_bus_grid(net=net18, rv=rv, rp=rp, rq=rq)  #
         _calc_different_se(net18, failures, name_str, path)
 
@@ -927,15 +951,14 @@ def evaluation_af(path: str = ".") -> None:
 
     This function aggregates allocation factor results from multiple CSV files (``af_df_*.csv``), excludes failed state
     estimation runs listed in ``failures.txt``, and creates an HTML file containing boxplots and histograms for each
-    allocation factor and solver. Creates the file ``allocation_factor_plots.html`` in ``path``, containing for each
-    solver and allocation factor:
+    allocation factor and solver. Creates the file ``allocation_factor_plots.html`` in ``path_eval`` (subdirectory which
+    will created if it does not exist), containing for each solver and allocation factor:
         * a boxplot of the allocation factor over all valid iterations, and
         * a histogram of the corresponding value distribution.
 
     Parameters:
         path:
-            Directory where the result files are stored and where the HTML report (``allocation_factor_plots.html``)
-            will be written. Defaults to the current directory (" . "). Expected files:
+            Directory where the result files are stored. Defaults to the current directory (" . "). Expected files:
                 * ``failures.txt``: text file with three columns (solver, iteration, status), used to identify and skip
                     failed runs.
                 * ``af_df_*.csv``: CSV files containing allocation factor results for each iteration. Each file must
@@ -944,7 +967,9 @@ def evaluation_af(path: str = ".") -> None:
     Raises:
         FileNotFoundError: If no CSV files matching ``af_df_*.csv`` are found in the given directory.
     """
-    html_file = os.path.join(path, "allocation_factor_plots.html")  # check if the file exists
+    path_eval = os.path.join(path, "evaluation")
+    os.makedirs(path_eval, exist_ok=True)
+    html_file = os.path.join(path_eval, "allocation_factor_plots.html")  # check if the file exists
     if os.path.exists(html_file):
         print(f"html file already exists: {html_file}")
         return
@@ -967,7 +992,7 @@ def evaluation_af(path: str = ".") -> None:
     # collect data
     # -------------------------------------------------------------------------
     af_total_dc = {solver: pd.DataFrame(columns=af_ls) for solver in solver_ls}
-    for i in range(len(csv_files)):
+    for i in tqdm(range(len(csv_files))):
         if not os.path.exists(csv_files[i]):
             print(f"Missing: {csv_files[i]}")
             continue
@@ -1081,7 +1106,7 @@ def evaluation_vp(path: str = ".") -> None:
                * expanded uncertainty of the voltage magnitude estimates.
         5. The figures are saved as separate HTML files.
 
-    The following output files are created:
+    The following output files are created and saved to subdirectory estimation:
         * ``voltage_magnitude.html``: Mean estimated and true bus voltage magnitudes with uncertainty bands.
         * ``line_power.html``: Mean estimated and true branch active powers with uncertainty bands.
         * ``voltage_uncertainty.html``: Expanded uncertainty of the voltage magnitude estimates.
@@ -1100,9 +1125,11 @@ def evaluation_vp(path: str = ".") -> None:
     Raises:
         FileNotFoundError: If required PICKLE result files cannot be found.
     """
-    html_vm_file = os.path.join(path, "voltage_magnitude.html")
-    html_lp_file = os.path.join(path, "line_power.html")
-    html_ve_file = os.path.join(path, "voltage_uncertainty.html")
+    path_eval = os.path.join(path, "evaluation")
+    os.makedirs(path_eval, exist_ok=True)
+    html_vm_file = os.path.join(path_eval, "voltage_magnitude.html")
+    html_lp_file = os.path.join(path_eval, "line_power.html")
+    html_ve_file = os.path.join(path_eval, "voltage_uncertainty.html")
     if os.path.exists(html_vm_file) and os.path.exists(html_lp_file) and os.path.exists(html_ve_file):
         print(f"html files already exists: {html_vm_file, html_lp_file, html_ve_file}")
         return
@@ -1133,7 +1160,7 @@ def evaluation_vp(path: str = ".") -> None:
     res_line_dc = {solver: {} for solver in solver_ls}
     res_line_est_dc = {solver: {} for solver in solver_ls}
 
-    for i in range(len(wls_ls)):
+    for i in tqdm(range(len(wls_ls))):
         for j in range(len(solver_ls)):
             if (solver_ls[j], i) in failure_set:
                 print(f"skip failure: solver={solver_ls[j]}, iteration={i}")
@@ -1310,14 +1337,14 @@ def evaluation_vp(path: str = ".") -> None:
 
 
 if __name__ == "__main__":
-
+    time_start = time.perf_counter()
     load_dotenv()
 
     mv_b: bool = False
     ieee14_b: bool = False
     ieee30_b: bool = False
-    bus18_b: bool = False
-    simbench_b: bool = True
+    bus18_b: bool = True
+    simbench_b: bool = False
 
     if mv_b:
         # rv=.01, rp=.03, rq=.03
@@ -1336,8 +1363,20 @@ if __name__ == "__main__":
         _add_measurements_af(net30, 112, 5, .0, .0, .0)
 
     if bus18_b:
-        s_path = str(os.getenv("PATH_0005"))
-        create_random_18_bus_grid_random_estimation(s_path, 1000, 112, .01, .01, .01)
+        s_path = os.path.join(str(os.getenv("PATH_18BUS")), "006")
+        os.makedirs(s_path, exist_ok=True)
+        create_random_18_bus_grid_random_estimation(
+            s_path,
+            1000,
+            112,
+            .01,
+            .01,
+            .01,
+            (.5,.8),
+            (.3,.6),
+            (.4, .8),
+            (.4,.7)
+        )
         evaluation_af(s_path)
         evaluation_vp(s_path)
 
@@ -1364,4 +1403,6 @@ if __name__ == "__main__":
             evaluation_vp(s_path)
             # net_sb.measurement.drop(net_sb.measurement.index, inplace=True)
             print(f"finished: {sb_grid}")
+    runtime = time.perf_counter() - time_start
+    print(f"calculated in: {timedelta(seconds=runtime)}")
     print(f"you shall not pass")
