@@ -1360,6 +1360,8 @@ if __name__ == "__main__":
             create_random_estimations_simbench(
                 net_sb, s_path, 1000, 112, None, None, .01, .01, .01, .01
             )
+            evaluation_af(s_path)
+            evaluation_vp(s_path)
             # net_sb.measurement.drop(net_sb.measurement.index, inplace=True)
             print(f"finished: {sb_grid}")
     print(f"you shall not pass")
