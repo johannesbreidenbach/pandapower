@@ -64,7 +64,7 @@ def set_user_pf_options(net, overwrite=False, **kwargs):
 
         net.user_pf_options.update(additional_kwargs)
 
-
+# ToDo: should run_control=True by default?
 def runpp(net, algorithm='nr', calculate_voltage_angles=True, init="auto",
           max_iteration="auto", tolerance_mva=1e-8, trafo_model="t",
           trafo_loading="current", enforce_p_lims=False, enforce_q_lims=False, check_connectivity=True,
@@ -161,6 +161,11 @@ def runpp(net, algorithm='nr', calculate_voltage_angles=True, init="auto",
             line temperature. If True, net.line must contain a column "temperature_degree_celsius".
             The temperature dependency coefficient alpha must be provided in the net.line.alpha
             column, otherwise the default value of 0.004 is used
+        run_control (bool, False): Enables the execution of controllers during the power flow calculation:
+
+            - If controllers are present and ``run_control=True``, they are executed.
+            - If no controllers are present, ``run_control=True`` has no effect and the power flow is calculated normally.
+            - If controllers are present but ``run_control=False``, they are ignored.
         distributed_slack (bool, False): Distribute slack power
             according to contribution factor weights for external grids
             and generators.

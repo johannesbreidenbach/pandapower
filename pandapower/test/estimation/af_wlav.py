@@ -1363,7 +1363,7 @@ if __name__ == "__main__":
         _add_measurements_af(net30, 112, 5, .0, .0, .0)
 
     if bus18_b:
-        s_path = os.path.join(str(os.getenv("PATH_18BUS")), "006")
+        s_path = os.path.join(str(os.getenv("PATH_18BUS")), "008")
         os.makedirs(s_path, exist_ok=True)
         create_random_18_bus_grid_random_estimation(
             s_path,
@@ -1374,8 +1374,8 @@ if __name__ == "__main__":
             .01,
             (.5,.8),
             (.3,.6),
-            (.4, .8),
-            (.4,.7)
+            (.1, .9),
+            (.1,.9)
         )
         evaluation_af(s_path)
         evaluation_vp(s_path)
