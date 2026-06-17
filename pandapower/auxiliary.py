@@ -2394,8 +2394,10 @@ def _init_runse_options(
     # _add_se_options(
     #     net,
     #     algorithm= "wls",
-    #     init="flat", tolerance=1e-6,
-    #     maximum_iterations=50, zero_injection="aux_bus",
+    #     init="flat",
+    #     tolerance=1e-6,
+    #     maximum_iterations=50,
+    #     zero_injection="aux_bus",
     #     fuse_buses_with_bb_switch="all",
     #     debug_mode=False,
     #     estimator="wls",

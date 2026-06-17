@@ -106,20 +106,20 @@ def estimate(
         debug_mode (bool):
 
     Keyword Args:
-        estimator (Literal["wls", "smgm"]): Used with ``algorithm="irwls"``.
-        linprog_method (Literal["highs", "highs-ds", "highs-ipm"]): supported for algorithm='lav'
-        wlav (bool): Perform LAV with weights.
-        with_ortools (bool):
+        estimator (Literal["wls", "smgm"], "wls"): Used with ``algorithm="irwls"``.
+        linprog_method (Literal["highs", "highs-ds", "highs-ipm"], "highs"): supported for algorithm='lav'
+        wlav (bool, False): Perform LAV with weights.
+        with_ortools (bool, True):
             Alternative solver to scipy for (W)LAV using `OR-Tools solver <https://github.com/google/or-tools>`_
-        af_init_value (float | np.ndarray):
+        af_init_value (float | np.ndarray, .5):
             Initial values for the af in E vector. One Value for all or an array for explicite. The
             value 0.5 is default.
-        af_target_value (float | np.ndarray | None):
+        af_target_value (float | np.ndarray | None, None):
             Optional pseudo-measurements (soft priors) for the af. Can be a scalar, a numpy array or None. Acts as a
             preferred value for the af (e.g. ``alpha=0.4``) in weakly observable cases and regularizes the estimation
             toward this value, but does not enforce it if it conflicts with the overall optimization of the state
             estimator. Specific value 0.4 used in a grid-operator use case.
-        af_std_value (float | np.ndarray | None):
+        af_std_value (float | np.ndarray | None, None):
             Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, a numpy array or None.
             Controls how strongly the pseudo-measurements for the af (e.g. 0.15) influence the
             estimation: smaller values imply a stronger pull toward `af_target_value`, larger values make the
