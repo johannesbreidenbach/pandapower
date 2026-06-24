@@ -1452,6 +1452,19 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0) ->
     print(f"saved html to: {html_ve_file}")
 
 
+def show_af_simbench():
+    sb_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]
+    for sb in sb_ls:
+        net_simbench = sb.get_simbench_net(sb_grid)
+        print(
+            f"Grid: {net_simbench}\n"
+            f"Allocation Factors Load: {net_simbench.load["type"].unique()}\n"
+            f"Allocation Factors Generator: {net_simbench.gen["type"].unique()}\n"
+            f"Allocation Factors Static Generator{net_simbench.sgen["type"].unique()}\n"
+            f"Number of buses: {len(net_simbench.bus)}\n"
+        )
+
+
 if __name__ == "__main__":
     time_start = time.perf_counter()
     load_dotenv()
@@ -1509,13 +1522,7 @@ if __name__ == "__main__":
 
             net_sb = sb.get_simbench_net(sb_grid)
             net_sb.load["type"] = net_sb.load["type"].fillna("residential")
-            # print(
-            #     f"Grid: {sb_grid}\n"
-            #     f"Allocation Factors Load: {net_sb.load["type"].unique()}\n"
-            #     f"Allocation Factors Generator: {net_sb.gen["type"].unique()}\n"
-            #     f"Allocation Factors Static Generator{net_sb.sgen["type"].unique()}\n"
-            #     f"Number of buses: {len(net_sb.bus)}\n"
-            # )
+
             create_random_estimations_simbench(
                 net_sb,
                 d_path,
