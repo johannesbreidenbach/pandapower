@@ -104,7 +104,7 @@ def _fill_measurement_values_from_powerflow(
     rq: float = 0.03
 ) -> None:
     """
-    Fill existing pandapower measurements with values from power flow results.
+    Fill existing empty pandapower measurements from simbench net with values from power flow results.
 
     Existing entries in net.measurement are not recreated. Only `value` and `std_dev` are updated. The measurement
     values are taken from the corresponding result tables and multiplied by `_r(...)` to add measurement uncertainty.
@@ -805,6 +805,8 @@ def _calc_different_se(
             if not af_lav["success"]:
                 failures.append(f"AF-LAV, {num_it}, se failed")
             to_pickle(net_af_lav, af_lav_file)
+            if af_lav["allocation_factors"].loc["AF-LAV"].min() < 0:
+                print(f"AF should not be negative: {af_lav["AF-LAV"]}")
         except Exception as e:
             failures.append(f"AF-LAV, {num_it}, exception {type(e).__name__}: {e}")
             print(f"AF-LAV iteration {num_it} crashed: {type(e).__name__}: {e}")
@@ -823,6 +825,8 @@ def _calc_different_se(
             if not af_wlav["success"]:
                 failures.append(f"AF-WLAV, {num_it}, se failed")
             to_pickle(net_af_wlav, af_wlav_file)
+            if af_wlav["allocation_factors"].loc["AF-WLAV"].min() < 0:
+                print(f"AF-WLAV should not be negative: {af_wlav["AF-WLAV"]}")
         except Exception as e:
             failures.append(f"AF-WLAV, {num_it}, exception {type(e).__name__}: {e}")
             print(f"AF-WLAV iteration {num_it} crashed: {type(e).__name__}: {e}")
@@ -939,7 +943,9 @@ def create_random_estimations_simbench(
         rv: float = .01,
         ri: float = .01,
         rp: float = .03,
-        rq: float = .03
+        rq: float = .03,
+        load_range: tuple[float, float] = (.5, .8),
+        sgen_range: tuple[float, float] = (.3, .5),
 ) -> None:
     """
     Every iteration applies random perturbations to the load and generation values used in the power flow calculation
@@ -962,6 +968,12 @@ def create_random_estimations_simbench(
         ri: standard deviation to apply a multiplicative perturbation to quantities for current
         rp: standard deviation to apply a multiplicative perturbation to quantities for active power
         rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
+        load_range:
+            Lower and upper bounds of the uniformly distributed scaling factors applied to loads for
+            :func:`_create_simbench_mc_case`.
+        sgen_range:
+            Lower and upper bounds of the uniformly distributed scaling factors applied to sgens for
+            :func:`_create_simbench_mc_case`.
     Returns: None
     """
 
@@ -969,7 +981,7 @@ def create_random_estimations_simbench(
     failures: list = []  # The list contains information about the final status of the state estimation
     for i in range(itr):
         name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
-        k = _create_simbench_mc_case(net, seed_pf)
+        k = _create_simbench_mc_case(net, seed_pf, load_range, sgen_range)
         _fill_measurement_values_from_powerflow(net, seed_m, rv, ri, rp, rq)
         _calc_different_se(net, failures, name_str, with_ortools, path)
 
@@ -1489,8 +1501,8 @@ if __name__ == "__main__":
         evaluation_vp(d_path, e_path)
 
     if simbench_b:
-        sb_grid_ls = ["1-MV-urban--0-sw", "1-MV-comm--0-sw"]  # "1-MV-semiurb--0-sw",
-        subdir = "000"
+        sb_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]  #
+        subdir = "001"
         for sb_grid in sb_grid_ls:
             d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid, subdir)
             os.makedirs(d_path, exist_ok=True)
@@ -1515,7 +1527,9 @@ if __name__ == "__main__":
                 .01,
                 .01,
                 .01,
-                .01
+                .01,
+                (.5, .8),
+                (.3, .5)
             )
             e_path = os.path.join(os.getenv("PATH_EVAL_SB", "."), sb_grid, subdir)
             evaluation_af(d_path, e_path)
