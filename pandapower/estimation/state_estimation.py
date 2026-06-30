@@ -104,6 +104,8 @@ def estimate(
                     still be fused
 
         debug_mode (bool):
+            If ``True``, additional diagnostic information is logged, including the current state update norm,
+            objective function value, and possible ill-conditioning of the gain matrix (only for WLS).
 
     Keyword Args:
         estimator (Literal["wls", "smgm"], "wls"): Used with ``algorithm="irwls"``.
@@ -155,13 +157,19 @@ def estimate(
                        )
 
 
-def remove_bad_data(net, init="flat", tolerance=1e-6, maximum_iterations=10,
-                    calculate_voltage_angles=True, rn_max_threshold=3.0):
+def remove_bad_data(
+        net,
+        init="flat",
+        tolerance=1e-6,
+        maximum_iterations=10,
+        calculate_voltage_angles=True,
+        rn_max_threshold=3.0
+) -> bool:
     """
     Wrapper function for bad data removal.
 
     Parameters:
-        net: The net within this line should be created
+        net (pandapowerNet): The net within this line should be created
         init (string): Initial voltage for the estimation. 'flat' sets 1.0 p.u. / 0° for all buses, 'results' uses the
             values from *res_bus_est* if available and 'slack' considers the slack bus voltage (and optionally, angle)
             as the initial values. Defaults to 'flat'
@@ -178,17 +186,21 @@ def remove_bad_data(net, init="flat", tolerance=1e-6, maximum_iterations=10,
     """
     wls_se = StateEstimation(net, tolerance, maximum_iterations, algorithm="wls")
     v_start, delta_start = _initialize_voltage(net, init)
-    return wls_se.perform_rn_max_test(v_start, delta_start, calculate_voltage_angles,
-                                      rn_max_threshold)
+    return wls_se.perform_rn_max_test(v_start, delta_start, calculate_voltage_angles, rn_max_threshold)
 
 
-def chi2_analysis(net, init="flat", tolerance=1e-6, maximum_iterations=10,
-                  calculate_voltage_angles=True, chi2_prob_false=0.05):
+def chi2_analysis(
+        net,
+        init="flat", tolerance=1e-6,
+        maximum_iterations=10,
+        calculate_voltage_angles=True,
+        chi2_prob_false=0.05
+) -> bool | None:
     """
-    Wrapper function for the chi-squared test.
+    Wrapper function for the chi-squared test. Only for WLS
 
     Parameters:
-        net: The net within this line should be created.
+        net (pandapowerNet): The net within this line should be created.
         init (string): Initial voltage for the estimation. 'flat' sets 1.0 p.u. / 0° for all buses, 'results' uses the
             values from *res_bus_est* if available and 'slack' considers the slack bus voltage (and optionally, angle)
             as the initial values. Defaults to 'flat'
@@ -209,13 +221,20 @@ def chi2_analysis(net, init="flat", tolerance=1e-6, maximum_iterations=10,
 
 class StateEstimation:
     """
-    Any user of the estimation module only needs to use the class state_estimation. It contains all
-    relevant functions to control and operator the module. Two functions are used to configure the
-    system according to the users needs while one function is used for the actual estimation
-    process.
+    Any user of the estimation module only needs to use the class state_estimation. It contains all relevant functions
+    to control and operator the module. Two functions are used to configure the system according to the users needs
+    while one function is used for the actual estimation process.
     """
 
-    def __init__(self, net, tolerance=1e-6, maximum_iterations=50, algorithm="wls", logger=None, recycle=False):
+    def __init__(
+            self,
+            net,
+            tolerance=1e-6,
+            maximum_iterations=50,
+            algorithm="wls",
+            logger=None,
+            recycle=False
+    ):
         self.logger = logger
         if self.logger is None:
             self.logger = std_logger
@@ -243,60 +262,72 @@ class StateEstimation:
                  fuse_buses_with_bb_switch="all", algorithm="wls", debug_mode=False, **opt_vars):
         ...
 
-    def estimate(self,
-                 v_start="flat",
-                 delta_start="flat",
-                 zero_injection=None,
-                 fuse_buses_with_bb_switch="all",
-                 debug_mode=False,
-                 **opt_vars
-                 ) -> dict[str, object]:
+    def estimate(
+            self,
+             v_start="flat",
+             delta_start="flat",
+             zero_injection=None,
+             fuse_buses_with_bb_switch="all",
+             debug_mode=False,
+             **opt_vars
+    ) -> dict[str, object]:
         """
-        The function estimate is the main function of the module. It takes the inputs
-        v_start and delta_start to initialize the state variables for the estimation process. 
-        Usually they can be initialized in a "flat-start" condition: All voltages being 1.0 pu and 
-        all voltage angles being 0 degrees. In this case, the parameters can be left at their 
-        default values (None). If the estimation is applied continuously, using the results from 
-        the last estimation as the starting condition for the current estimation can decrease the 
-        amount of iterations needed to estimate the current state. 
-        Returned is a boolean value, which is true after a successful estimation and false otherwise.
-        The resulting complex voltage will be written into the pandapower network. The result
-        fields are found res_bus_est of the pandapower network.
+        The function estimate is the main function of the module. It takes the inputs v_start and delta_start to
+        initialize the state variables for the estimation process. Usually they can be initialized in a "flat-start"
+        condition: All voltages being 1.0 pu and all voltage angles being 0 degrees. In this case, the parameters can be
+        left at their default values (None). If the estimation is applied continuously, using the results from the last
+        estimation as the starting condition for the current estimation can decrease the amount of iterations needed to
+        estimate the current state.
+        Returned is a boolean value, which is true after a successful estimation and false otherwise. The resulting
+        complex voltage will be written into the pandapower network. The result fields are found res_bus_est of the
+        pandapower network.
 
-        INPUT:
-            **net** - The net within this line should be created
-            **v_start** (np.array, shape=(1,), optional) - Vector with initial values for all
-            voltage magnitudes in p.u. (sorted by bus index)
-            **delta_start** (np.array, shape=(1,), optional) - Vector with initial values for all
-            voltage angles in degrees (sorted by bus index)
+        Parameters:
+            v_start (np.array, shape=(1,), optional):
+                Vector with initial values for all voltage magnitudes in p.u.(sorted by bus index)
+            delta_start (np.array, shape=(1,), optional):
+                Vector with initial values for all voltage angles in degrees (sorted by bus index)
+            zero_injection (str, iterable, None):
+                Defines which buses are zero injection bus or the method to identify zero injection bus, with
+                'wls_estimator' virtual measurements will be added, with 'wls_estimator with zero constraints' the buses
+                will be handled as constraints
 
-        OPTIONAL:
-            **tolerance** - (float) - When the maximum state change between iterations is less than
-            tolerance, the process stops. Default is 1e-6
+                    - None: no bus will be identified as zero injection bus
+                    - "aux_bus": only aux bus will be identified as zero injection bus
+                    - "no_inj_bus": aux bus and bus without p,q measurement and without any connected injection
+                        (load, sgen...) will be identified as zero injection bus
+                    - "zero_pwr_bus": aux bus and all bus without p,q measurement that have either no connected
+                        injection (load, sgen...) or a connected injection (load, sgen...) equal to zero will be
+                        identified as zero injection bus
+                    - iterable: the iterable should contain index of the zero injection bus and also aux bus will be
+                        identified as zero-injection bus
 
-            **maximum_iterations** - (integer) - Maximum number of iterations. Default is 50
+            fuse_buses_with_bb_switch (str, iterable, None):
+                Defines how buses with closed bb switches should be handled, if fuse buses will only fuse to one for
+                calculation, if not fuse, an auxiliary bus and auxiliary line will be automatically added to the network
+                to make the buses with different p,q injection measurements identifiable
 
-            **zero_injection** - (str, iterable, None) - Defines which buses are zero injection bus or the method
-            to identify zero injection bus, with 'wls_estimator' virtual measurements will be added, with
-            'wls_estimator with zero constraints' the buses will be handled as constraints.
-                "auto": all bus without p,q measurement, without p, q value (load, sgen...) + aux buses will be
-                identified as zero injection bus
-                "aux_bus": only aux bus will be identified as zero injection bus
-                None: no bus will be identified as zero injection bus
-                iterable: the iterable should contain index of the zero injection bus and also aux bus will be identified
-                as zero-injection bus
+                    - "all": all buses with bb-switches will be fused, the same as the default behaviour in load flow
+                    - None:
+                        buses with bb-switches and individual p,q measurements will be reconfigurated by auxiliary
+                        elements
+                    - iterable:
+                        the iterable should contain the index of buses to be fused, the behaviour is contigous e.g. if
+                        one of the bus among the buses connected through bb switch is given, then all of them will still
+                        be fused
 
-            **fuse_buses_with_bb_switch** - (str, iterable, None) - Defines how buses with closed bb switches should
-            be handled, if fuse buses will only fused to one for calculation, if not fuse, an auxiliary bus and
-            auxiliary line will be automatically added to the network to make the buses with different p,q injection
-            measurements identifieble
-                "all": all buses with bb-switches will be fused, the same as the default behaviour in load flow
-                None: buses with bb-switches and individual p,q measurements will be reconfigurated
-                by auxiliary elements
-                iterable: the iterable should contain the index of buses to be fused, the behaviour is contigous e.g.
-                if one of the bus among the buses connected through bb switch is given, then all of them will still
-                be fused
-        OUTPUT:
+            debug_mode (bool):
+                If ``True``, additional diagnostic information is logged, including the current state update norm,
+                objective function value, and possible ill-conditioning of the gain matrix (only for WLS).
+
+        Keyword Args:
+            tolerance (float):
+                When the maximum state change between iterations is less than tolerance, the process stops. Default is
+                1e-6.
+            maximum_iterations (integer): Maximum number of iterations. Default is 50.
+
+
+        Returns:
             For "wls", "af-wls", "lp", "af-lp" will give back a dictionary with:
 
                 - "success": self.solver.successful,
@@ -304,13 +335,6 @@ class StateEstimation:
                 - "objective_function_value": self.solver.obj_func,
                 - "allocation factor": self.solver.af,
                 - "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            **successful** (boolean) - True if the estimation process was successful
-        Optional estimation variables:
-            The bus power injections can be accessed with *se.s_node_powers* and the estimated
-            values corresponding to the (noisy) measurement values with *se.hx*. (*hx* denotes h(x))
-        EXAMPLE:
-            success = estimate(np.array([1.0, 1.0, 1.0]), np.array([0.0, 0.0, 0.0]))
         """
         # check if all parameter are allowed
         for var_name in opt_vars.keys():
@@ -336,18 +360,19 @@ class StateEstimation:
         af_std_value = opt_vars.get("af_std_value", OPT_VAR_DEFAULTS["af_std_value"])
         if (af_target_value is None) != (af_std_value is None):
             raise ValueError("af_target_value and af_std_value are both None or both not None.")
-        self.net, self.ppc, self.eppci = pp2eppci(self.net,
-                                                  v_start=v_start,
-                                                  delta_start=delta_start,
-                                                  calculate_voltage_angles=True,
-                                                  zero_injection=zero_injection,
-                                                  algorithm=self.algorithm,
-                                                  ppc=self.ppc,
-                                                  eppci=self.eppci,
-                                                  af_init_value=af_init_value,
-                                                  af_target_value=af_target_value,
-                                                  af_std_value=af_std_value
-                                                  )
+        self.net, self.ppc, self.eppci = pp2eppci(
+            self.net,
+            v_start=v_start,
+            delta_start=delta_start,
+            calculate_voltage_angles=True,
+            zero_injection=zero_injection,
+            algorithm=self.algorithm,
+            ppc=self.ppc,
+            eppci=self.eppci,
+            af_init_value=af_init_value,
+            af_target_value=af_target_value,
+            af_std_value=af_std_value
+        )
 
         # Estimate voltage magnitude and angle with the given estimator
         self.eppci = self.solver.estimate(self.eppci, debug_mode=debug_mode, **opt_vars)
@@ -373,45 +398,41 @@ class StateEstimation:
                 "num_iterations": self.solver.iterations,
                 "objective_function_value": self.solver.obj_func,
                 "allocation_factors": self.solver.af,
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                "completion_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         else:
             se_results = {"success":self.solver.successful}
 
         return se_results
 
-    def perform_chi2_test(self, v_in_out=None, delta_in_out=None,
-                          calculate_voltage_angles=True, chi2_prob_false=0.05):
+    def perform_chi2_test(
+            self,
+            v_in_out=None,
+            delta_in_out=None,
+            calculate_voltage_angles :bool = True,
+            chi2_prob_false=0.05
+    ) -> bool | None:
         """
-        The function perform_chi2_test performs a Chi^2 test for bad data and topology error
-        detection. The function can be called with the optional input arguments v_in_out and
-        delta_in_out. Then, the Chi^2 test is performed after calling the function estimate using
-        them as input arguments. It can also be called without these arguments if it is called
-        from the same object with which estimate had been called beforehand. Then, the Chi^2 test is
-        performed for the states estimated by the funtion estimate and the result, the existence of bad data,
-        is given back as a boolean. As a optional argument the probability
-        of a false measurement can be provided additionally. For bad data detection, the function
-        perform_rn_max_test is more powerful and should be the function of choice. For topology
-        error detection, however, perform_chi2_test should be used.
+        The function perform_chi2_test performs a Chi^2 test for bad data and topology error detection.
 
-        INPUT:
-            **v_in_out** (np.array, shape=(1,), optional) - Vector with initial values for all
-            voltage magnitudes in p.u. (sorted by bus index)
+        The function can be called with the optional input arguments v_in_out and delta_in_out. Then, the Chi^2 test is
+        performed after calling the function estimate using them as input arguments. It can also be called without these
+        arguments if it is called from the same object with which estimate had been called beforehand. Then, the Chi^2
+        test is performed for the states estimated by the funtion estimate and the result, the existence of bad data, is
+        given back as a boolean. As a optional argument the probability of a false measurement can be provided
+        additionally. For bad data detection, the function perform_rn_max_test is more powerful and should be the
+        function of choice. For topology error detection, however, perform_chi2_test should be used.
 
-            **delta_in_out** (np.array, shape=(1,), optional) - Vector with initial values for all
-            voltage angles in degrees (sorted by bus index)
+        Parameters:
+            v_in_out (np.array, shape=(1,), optional):
+                Vector with initial values for all voltage magnitudes in p.u. (sorted by bus index)
+            delta_in_out (np.array, shape=(1,), optional):
+                Vector with initial values for all voltage angles in degrees (sorted by bus index)
+            calculate_voltage_angles (boolean):
+                Take into account absolute voltage angles and phase shifts in transformers, if init is 'slack'.
+                Default is True
+            chi2_prob_false (float): probability of error / false alarms (standard value: 0.05)
 
-        OPTIONAL:
-            **calculate_voltage_angles** - (boolean) - Take into account absolute voltage angles and phase
-            shifts in transformers, if init is 'slack'. Default is True
-
-            **chi2_prob_false** (float) - probability of error / false alarms (standard value: 0.05)
-
-        OUTPUT:
-            **successful** (boolean) - True if bad data has been detected
-
-        EXAMPLE:
-            perform_chi2_test(np.array([1.0, 1.0, 1.0]), np.array([0.0, 0.0, 0.0]), 0.97)
-
+        Returns: True if bad data has been detected
         """
         # perform SE
         self.estimate(v_in_out, delta_in_out, calculate_voltage_angles)
@@ -441,44 +462,39 @@ class StateEstimation:
         else:
             self.bad_data_present = True
             self.logger.debug("Chi^2 test failed. Bad data or topology error detected.")
+        return self.bad_data_present if self.solver.successful else None
 
-        if self.solver.successful:
-            return self.bad_data_present
-
-    def perform_rn_max_test(self, v_in_out=None, delta_in_out=None,
-                            calculate_voltage_angles=True, rn_max_threshold=3.0):
+    def perform_rn_max_test(
+            self,
+            v_in_out=None,
+            delta_in_out=None,
+            calculate_voltage_angles=True,
+            rn_max_threshold=3.0
+    ) -> bool:
         """
-        The function perform_rn_max_test performs a largest normalized residual test for bad data
-        identification and removal. It takes two input arguments: v_in_out and delta_in_out.
-        These are the initial state variables for the combined estimation and bad data
-        identification and removal process. They can be initialized as described above, e.g.,
-        using a "flat" start. In an iterative process, the function performs a state estimation,
-        identifies a bad data measurement, removes it from the set of measurements
-        (only if the rn_max threshold is violated by the largest residual of all measurements,
-        which can be modified), performs the state estimation again,
-        and so on and so forth until no further bad data measurements are detected.
+        The function perform_rn_max_test performs a largest normalized residual test for bad data identification and
+        removal.
 
-        INPUT:
-            **v_in_out** (np.array, shape=(1,), optional) - Vector with initial values for all
-            voltage magnitudes in p.u. (sorted by bus index)
+        It takes two input arguments: v_in_out and delta_in_out. These are the initial state variables for the combined
+        estimation and bad data identification and removal process. They can be initialized as described above, e.g.,
+        using a "flat" start. In an iterative process, the function performs a state estimation, identifies a bad data
+        measurement, removes it from the set of measurements (only if the rn_max threshold is violated by the largest
+        residual of all measurements, which can be modified), performs the state estimation again, and so on and so
+        forth until no further bad data measurements are detected.
 
-            **delta_in_out** (np.array, shape=(1,), optional) - Vector with initial values for all
-            voltage angles in degrees (sorted by bus index)
+        Parameters:
+            v_in_out (np.array, shape=(1,), optional):
+                Vector with initial values for all voltage magnitudes in p.u. (sorted by bus index)
+            delta_in_out (np.array, shape=(1,), optional):
+                Vector with initial values for all voltage angles in degrees (sorted by bus index)
+            calculate_voltage_angles (boolean):
+                Take into account absolute voltage angles and phase shifts in transformers, if init is 'slack'. Default
+                is True
+            rn_max_threshold (float):
+                Identification threshold to determine if the largest normalized residual reflects a bad measurement
+                (standard value of 3.0)
 
-        OPTIONAL:
-            **calculate_voltage_angles** - (boolean) - Take into account absolute voltage angles and phase
-            shifts in transformers, if init is 'slack'. Default is True
-
-            **rn_max_threshold** (float) - Identification threshold to determine
-            if the largest normalized residual reflects a bad measurement
-            (standard value of 3.0)
-
-        OUTPUT:
-            **successful** (boolean) - True if all bad data could be removed
-
-        EXAMPLE:
-            perform_rn_max_test(np.array([1.0, 1.0, 1.0]), np.array([0.0, 0.0, 0.0]), 5.0, 0.05)
-
+        Returns: True if all bad data could be removed.
         """
         num_iterations = 0
 
@@ -540,5 +556,4 @@ class StateEstimation:
 
             self.logger.debug(f"rN_max identification threshold: {rn_max_threshold:.2f}")
             num_iterations += 1
-
         return False

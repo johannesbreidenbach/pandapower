@@ -84,8 +84,11 @@ class BaseAlgebra:
         hx = np.r_[Pbuse, Qbuse, Pfe, Qfe, Pte, Qte, Vm, Va, Imfe, Imte]
 
         if self.eppci.algorithm in ["af-wls", "af-lp"]:
+            # add balance equations defined for the current injection of each bus
             Pb2 = np.real(Sbuse) - np.sum(np.multiply(E2,self.eppci["rated_power_clusters"][:,:num_clusters]),axis=1)
-            Qb2 = np.imag(Sbuse) - np.sum(np.multiply(E2,self.eppci["rated_power_clusters"][:,num_clusters:2*num_clusters]),axis=1)
+            Qb2 = np.imag(Sbuse) - np.sum(
+                np.multiply(E2,self.eppci["rated_power_clusters"][:,num_clusters:2*num_clusters]),axis=1
+            )
             Pbuse2 = Pb2[meas_mask["pbalance"]]
             Qbuse2 = Qb2[meas_mask["qbalance"]]
             E2e = E2[meas_mask["afactor"]]

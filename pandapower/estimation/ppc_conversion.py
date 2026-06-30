@@ -3,10 +3,12 @@
 
 
 from collections import UserDict
-from typing import Dict
+from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from numpy.typing import NDArray
 
 from pandapower.pypower.idx_bus import BUS_TYPE as pypower_BUS_TYPE, VM as pypower_VM, VA as pypower_VA
 from pandapower.auxiliary import _init_runse_options, pandapowerNet
@@ -105,7 +107,7 @@ def _add_measurements_to_branch(
         branch_append: np.ndarray,
         meas: pd.DataFrame,
         element_name: str,
-        side_map: Dict[str, str],
+        side_map: dict[str, str],
         map_branch: pd.Series,
 ) -> None:
     """
@@ -372,6 +374,7 @@ def _add_rated_power_information_af_wls(net, ppci):
     ppci["clusters"] = cluster_list_tot
     num_clusters = len(cluster_list_tot)
     num_buses = ppci["bus"].shape[0]
+    # Matrix for information aboutP, Q, std(P), std(Q)
     ppci["rated_power_clusters"] = np.zeros([num_buses, 4 * num_clusters])
     for var in ["load", "sgen"]:
         in_service = net[var]["in_service"]
@@ -655,7 +658,7 @@ def _build_measurement_vectors(
         if af_target_value is not None:
             af_vmeas = _prepare_af(af_target_value, len(ppci["clusters"]))
         else:
-            af_vmeas = np.array([])
+            af_vmeas = np.array([], dtype=np.float64)
         z = np.concatenate(
             (z, balance_eq_meas[ppci.non_slack_bus_mask], balance_eq_meas[ppci.non_slack_bus_mask], af_vmeas))
         imag_meas = np.concatenate((imag_meas,
@@ -688,16 +691,19 @@ def _build_measurement_vectors(
                                 ppci["branch"][i_line_f_not_nan, branch_cols + IM_FROM_STD],
                                 ppci["branch"][i_line_t_not_nan, branch_cols + IM_TO_STD],
                                 )).real.astype(np.float64)
-        meas_mask = {"pbus" : np.flatnonzero(p_bus_not_nan),
-                     "qbus" : np.flatnonzero(q_bus_not_nan),
-                     "pfrom" : np.flatnonzero(p_line_f_not_nan),
-                     "qfrom" : np.flatnonzero(q_line_f_not_nan),
-                     "pto" : np.flatnonzero(p_line_t_not_nan),
-                     "qto" : np.flatnonzero(q_line_t_not_nan),
-                     "vm" : np.flatnonzero(v_bus_not_nan),
-                     "va" : np.flatnonzero(v_degree_bus_not_nan),
-                     "ifrom" : np.flatnonzero(i_line_f_not_nan),
-                     "ito" : np.flatnonzero(i_line_t_not_nan)}
+
+        meas_mask: dict[str, NDArray[Any]] = {
+            "pbus" : np.flatnonzero(p_bus_not_nan),
+            "qbus" : np.flatnonzero(q_bus_not_nan),
+            "pfrom" : np.flatnonzero(p_line_f_not_nan),
+            "qfrom" : np.flatnonzero(q_line_f_not_nan),
+            "pto" : np.flatnonzero(p_line_t_not_nan),
+            "qto" : np.flatnonzero(q_line_t_not_nan),
+            "vm" : np.flatnonzero(v_bus_not_nan),
+            "va" : np.flatnonzero(v_degree_bus_not_nan),
+            "ifrom" : np.flatnonzero(i_line_f_not_nan),
+            "ito" : np.flatnonzero(i_line_t_not_nan)
+        }
         
         if ppci.algorithm in ["af-wls", "af-lp"]:
             num_clusters = len(ppci["clusters"])
@@ -709,16 +715,16 @@ def _build_measurement_vectors(
             if af_std_value is not None:
                 af_vmeas_dev_std = _prepare_af(af_std_value, len(ppci["clusters"]))
             else:
-                af_vmeas_dev_std = np.array([])
+                af_vmeas_dev_std = np.array([], dtype=np.float64)
             r_cov = np.concatenate(
                 (r_cov, P_balance_dev_std[ppci.non_slack_bus_mask], Q_balance_dev_std[ppci.non_slack_bus_mask],
                  af_vmeas_dev_std))
             meas_mask["pbalance"] = np.flatnonzero(ppci.non_slack_bus_mask)
             meas_mask["qbalance"] = np.flatnonzero(ppci.non_slack_bus_mask)
             if af_target_value is None:
-                meas_mask["afactor"] = np.empty(0, dtype=np.int64)
+                meas_mask["afactor"] = np.array([], dtype=np.int64)  # np.empty(0, dtype=np.int64)
             else:
-                meas_mask["afactor"] = np.arange(num_clusters)
+                meas_mask["afactor"] = np.arange(num_clusters, dtype=np.int64)
 
         return z, pp_meas_indices, r_cov, meas_mask, idx_non_imeas
     else:

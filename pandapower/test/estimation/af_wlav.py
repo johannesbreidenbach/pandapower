@@ -806,7 +806,9 @@ def _calc_different_se(
                 failures.append(f"AF-LAV, {num_it}, se failed")
             to_pickle(net_af_lav, af_lav_file)
             if af_lav["allocation_factors"].loc["AF-LAV"].min() < 0:
-                print(f"AF should not be negative: {af_lav["AF-LAV"]}")
+                # af_lav["allocation_factors"]["sum"] = af_lav["allocation_factors"].loc["AF-LAV"].sum()
+                print(f"AF (AF-LAV) should not be negative")
+
         except Exception as e:
             failures.append(f"AF-LAV, {num_it}, exception {type(e).__name__}: {e}")
             print(f"AF-LAV iteration {num_it} crashed: {type(e).__name__}: {e}")
@@ -826,7 +828,7 @@ def _calc_different_se(
                 failures.append(f"AF-WLAV, {num_it}, se failed")
             to_pickle(net_af_wlav, af_wlav_file)
             if af_wlav["allocation_factors"].loc["AF-WLAV"].min() < 0:
-                print(f"AF-WLAV should not be negative: {af_wlav["AF-WLAV"]}")
+                print(f"AF (AF-WLAV) should not be negative")
         except Exception as e:
             failures.append(f"AF-WLAV, {num_it}, exception {type(e).__name__}: {e}")
             print(f"AF-WLAV iteration {num_it} crashed: {type(e).__name__}: {e}")
@@ -838,39 +840,30 @@ def _calc_different_se(
     if os.path.exists(res_af_file):
         print(f"file {res_af_file} already exists")
     else:
-        columns = None
+        col = None
+        # If one solver return allocation factors (af) their names will read out
         for af in [af_wls, af_wlav, af_lav]:
             if af is not None:
-                columns = af["allocation_factors"].columns
+                col = af["allocation_factors"].columns
                 break
-        if columns is None:
+        # If all allocation factors from the solvers are None no file will save.
+        if col is None:
             print(f"No allocation factors available for iteration {num_it}")
             return
+        # The solver which have None values get an DataFrame with None
         if af_wls is None:
-            af_wls_df = pd.DataFrame(
-                [[None] * len(columns)],
-                columns=columns,
-                index=["AF-WLS"]
-            )
+            af_wls_df = pd.DataFrame([[None] * len(col)], columns=col, index=["AF-WLS"])
         else:
             af_wls_df = af_wls["allocation_factors"]
         if af_lav is None:
-            af_lav_df = pd.DataFrame(
-                [[None] * len(columns)],
-                columns=columns,
-                index=["AF-LAV"]
-            )
+            af_lav_df = pd.DataFrame([[None] * len(col)], columns=col, index=["AF-LAV"])
         else:
             af_lav_df = af_lav["allocation_factors"]
         if af_wlav is None:
-            af_wlav_df = pd.DataFrame(
-                [[None] * len(columns)],
-                columns=columns,
-                index=["AF-WLAV"]
-            )
+            af_wlav_df = pd.DataFrame([[None] * len(col)], columns=col, index=["AF-WLAV"])
         else:
             af_wlav_df = af_wlav["allocation_factors"]
-
+        # all dataframes with af form all solvers will concat to one
         res_af_df = pd.concat([af_wls_df, af_wlav_df, af_lav_df])
         res_af_df.to_csv(res_af_file, index=True)
 
@@ -1453,9 +1446,9 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0) ->
 
 
 def show_af_simbench():
-    sb_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]
-    for sb in sb_ls:
-        net_simbench = sb.get_simbench_net(sb_grid)
+    simbench_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]
+    for simbench_grid in simbench_grid_ls:
+        net_simbench = sb.get_simbench_net(simbench_grid)
         print(
             f"Grid: {net_simbench}\n"
             f"Allocation Factors Load: {net_simbench.load["type"].unique()}\n"
@@ -1472,8 +1465,8 @@ if __name__ == "__main__":
     mv_b: bool = False
     ieee14_b: bool = False
     ieee30_b: bool = False
-    bus18_b: bool = False
-    simbench_b: bool = True
+    bus18_b: bool = True
+    simbench_b: bool = False
 
     if mv_b:
         # rv=.01, rp=.03, rq=.03
@@ -1492,21 +1485,17 @@ if __name__ == "__main__":
         _add_measurements_af(net30, 112, 5, .0, .0, .0)
 
     if bus18_b:
-        subdir = "008"
+        subdir = "000"
         d_path = os.path.join(str(os.getenv("PATH_DATA_18BUS")), subdir)
         os.makedirs(d_path, exist_ok=True)
         create_random_18_bus_grid_random_estimation(
             d_path,
-            15,
+            1000,
             112,
             False,
             .01,
             .01,
             .01,
-            (.5,.8),
-            (.3,.6),
-            (.1, .9),
-            (.1,.9)
         )
 
         e_path = os.path.join(str(os.getenv("PATH_EVAL_18BUS")), subdir)
@@ -1515,7 +1504,7 @@ if __name__ == "__main__":
 
     if simbench_b:
         sb_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]  #
-        subdir = "001"
+        subdir = "000"
         for sb_grid in sb_grid_ls:
             d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid, subdir)
             os.makedirs(d_path, exist_ok=True)
