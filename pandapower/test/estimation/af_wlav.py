@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.io as pio
 
 from dotenv import load_dotenv
 
@@ -405,6 +406,7 @@ def _create_measurement_18_bus_grid(
 
 def _create_18_bus_grid(
         base_mva: float = 10.0,
+        v_b = 11.0,
         slack_v: float = 1.0,
         slack_va_degree: float = 0.0,
         load_range: tuple[float, float] = (.5, .8),
@@ -432,6 +434,7 @@ def _create_18_bus_grid(
 
     Parameters:
         base_mva: Base apparent power of the system in MVA. Corresponds to ``Sb`` in the MATLAB implementation.
+        v_b: in kV. Base voltage of the distribution grid
         slack_v: Voltage magnitude of the slack bus in per-unit.
         slack_va_degree: Voltage angle of the slack bus in degrees.
         load_range: Range of scaling factor (uniformly distributed) for load (residential load)
@@ -466,9 +469,7 @@ def _create_18_bus_grid(
     #   - impedance in Ohm
     #
     # Therefore, the per-unit values must be converted.
-    #
-    # Base voltage of the distribution grid
-    v_b = 11.0  # kV
+
     # Base impedance:
     #
     #     Z_base = V_base² / S_base
@@ -741,6 +742,7 @@ def _create_18_bus_grid(
 def _calc_different_se(
         net_base: pandapowerNet,
         failures: list,
+        neg_af: list,
         num_it: str,
         with_ortools: bool = True,
         data_path: str = ".") -> None:
@@ -762,6 +764,7 @@ def _calc_different_se(
     Parameters:
         net_base: Base pandapower grid on which all three state estimation methods are applied.
         failures: List that is extended by a text entry for each estimation that fails to converge.
+        neg_af: List where information about negative af will save.
         num_it: Identifier for this run (e.g. iteration counter) used in all output filenames.
         with_ortools: OR-Tools solver for linear solver ("lp" algorithm). False take scipy solver.
         data_path: Directory where the PICKLE and CSV result files are stored.
@@ -807,6 +810,7 @@ def _calc_different_se(
             to_pickle(net_af_lav, af_lav_file)
             if af_lav["allocation_factors"].loc["AF-LAV"].min() < 0:
                 # af_lav["allocation_factors"]["sum"] = af_lav["allocation_factors"].loc["AF-LAV"].sum()
+                neg_af.append(f"AF-LAV, {num_it}, negative allocation factors")
                 print(f"AF (AF-LAV) should not be negative")
 
         except Exception as e:
@@ -828,6 +832,7 @@ def _calc_different_se(
                 failures.append(f"AF-WLAV, {num_it}, se failed")
             to_pickle(net_af_wlav, af_wlav_file)
             if af_wlav["allocation_factors"].loc["AF-WLAV"].min() < 0:
+                neg_af.append(f"AF-WLAV, {num_it}, negative allocation factors")
                 print(f"AF (AF-WLAV) should not be negative")
         except Exception as e:
             failures.append(f"AF-WLAV, {num_it}, exception {type(e).__name__}: {e}")
@@ -907,22 +912,31 @@ def create_random_18_bus_grid_random_estimation(
 
     np.random.seed(seed)
     failures: list = []  # The list contains information about the final status of the state estimation
+    neg_af: list = []
     for i in tqdm(range(itr)):
         name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
         net18, k = _create_18_bus_grid(
             load_range=load_range, com_range=com_range, pv_range=pv_range, wind_range=wind_range
         )
         _create_measurement_18_bus_grid(net=net18, rv=rv, rp=rp, rq=rq)  #
-        _calc_different_se(net18, failures, name_str, with_ortools, data_path)
+        _calc_different_se(net18, failures, neg_af, name_str, with_ortools, data_path)
 
-    # if failures is not empty the list will save as txt file.
+    # If failures and negative af are not empty, the list will save as txt file.
     if not failures:
-        print("List is empty, very good")
+        print("failures is empty, very good")
     else:
-        print(f"List is not empty: {failures}")
         with open(os.path.join(data_path, "failures.txt"), "w", encoding="utf-8") as f:
             for failure in failures:
                 f.write(failure + "\n")
+        print(f"List is not empty: {failures}")
+
+    if not neg_af:
+        print("neg_af is empty, also good")
+    else:
+        with open(os.path.join(data_path, "neg_af.txt"), "w", encoding="utf-8") as f:
+            for n_af in neg_af:
+                f.write(n_af + "\n")
+        print(f"List is not empty: {neg_af}")
 
 
 def create_random_estimations_simbench(
@@ -972,21 +986,27 @@ def create_random_estimations_simbench(
 
     np.random.seed(seed)
     failures: list = []  # The list contains information about the final status of the state estimation
+    neg_af: list = []
     for i in range(itr):
         name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
         k = _create_simbench_mc_case(net, seed_pf, load_range, sgen_range)
         _fill_measurement_values_from_powerflow(net, seed_m, rv, ri, rp, rq)
-        _calc_different_se(net, failures, name_str, with_ortools, path)
-
-    with open(os.path.join(path, "failures.txt"), "w", encoding="utf-8") as f:
-        for failure in failures:
-            f.write(failure + "\n")
+        _calc_different_se(net, failures, neg_af, name_str, with_ortools, path)
 
     if not failures:
         print("List is empty, very good")
     else:
+        with open(os.path.join(path, "failures.txt"), "w", encoding="utf-8") as f:
+            for failure in failures:
+                f.write(failure + "\n")
         print(f"List is not empty: {failures}")
-
+    if not neg_af:
+        print("neg_af is empty, also good")
+    else:
+        with open(os.path.join(path, "neg_af.txt"), "w", encoding="utf-8") as f:
+            for n_af in neg_af:
+                f.write(n_af + "\n")
+        print(f"List is not empty: {neg_af}")
 
 
 def load_failures(data_path: str = ".", eval_path: str = ".") -> set[tuple[str, int]]:
@@ -1047,7 +1067,7 @@ def evaluation_af(data_path: str = ".", eval_path: str = "." ) -> None:
 
     Returns: None
     """
-    save_path = os.path.join(eval_path, "evaluation")
+    save_path = os.path.join(eval_path, "statistical")
     os.makedirs(save_path, exist_ok=True)
     html_file = os.path.join(save_path, "allocation_factor_plots.html")  # check if the file exists
     if os.path.exists(html_file):
@@ -1230,7 +1250,7 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0) ->
     Raises:
         FileNotFoundError: If required PICKLE result files cannot be found.
     """
-    save_path = os.path.join(eval_path, "evaluation")
+    save_path = os.path.join(eval_path, "statistical")
     os.makedirs(save_path, exist_ok=True)
     html_vm_file = os.path.join(save_path, "voltage_magnitude.html")
     html_lp_file = os.path.join(save_path, "line_power.html")
@@ -1445,6 +1465,208 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0) ->
     print(f"saved html to: {html_ve_file}")
 
 
+def write_bus_voltage_multi_html(
+        records: list[dict],
+        eval_path: str,
+        html_name: str,
+        title: str
+) -> None:
+    save_path = os.path.join(eval_path, "bus")
+    os.makedirs(save_path, exist_ok=True)
+
+    save_html = os.path.join(save_path, html_name)
+
+    df = pd.DataFrame(records)
+
+    if df.empty:
+        print(f"No records for {save_html}")
+        return
+
+    iterations = sorted(df["iteration"].unique())
+
+    html_parts = [
+        "<html><head><meta charset='utf-8'></head><body>",
+        f"<h1>{title}</h1>",
+    ]
+
+    for k, iteration in enumerate(iterations):
+        group = df[df["iteration"] == iteration]
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            x=group["bus"],
+            y=group["powerflow"],
+            name="Powerflow",
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=group["bus"],
+            y=group["estimated"],
+            name="Estimated",
+        ))
+
+        fig.update_layout(
+            title=f"Iteration {iteration}",
+            xaxis_title="Bus",
+            yaxis_title="Spannung [p.u.]",
+            barmode="group",
+            height=450,
+        )
+
+        # fig.update_yaxes(range=[0.9, 1.05])
+
+        html_parts.append(f"<h2>Iteration {iteration}</h2>")
+        html_parts.append(
+            pio.to_html(
+                fig,
+                full_html=False,
+                include_plotlyjs="cdn" if k == 0 else False
+            )
+        )
+
+    html_parts.append("</body></html>")
+
+    with open(save_html, "w", encoding="utf-8") as f:
+        f.write("\n".join(html_parts))
+    print(f"saved to {save_html}")
+
+
+def write_bus_power_multi_html(
+        records: list[dict],
+        eval_path: str,
+        html_name: str,
+        title: str
+) -> None:
+    save_path = os.path.join(eval_path, "bus")
+    os.makedirs(save_path, exist_ok=True)
+
+    save_html = os.path.join(save_path, html_name)
+
+    df = pd.DataFrame(records)
+
+    if df.empty:
+        print(f"No records for {save_html}")
+        return
+
+    iterations = sorted(df["iteration"].unique())
+
+    html_parts = [
+        "<html><head><meta charset='utf-8'></head><body>",
+        f"<h1>{title}</h1>",
+    ]
+
+    for k, iteration in enumerate(iterations):
+        group = df[df["iteration"] == iteration]
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=group["bus"],
+            y=group["powerflow"],
+            name="Powerflow",
+        ))
+
+        fig.add_trace(go.Bar(
+            x=group["bus"],
+            y=group["estimated"],
+            name="Estimated",
+        ))
+
+        fig.update_layout(
+            title=f"Iteration {iteration}",
+            xaxis_title="Bus",
+            yaxis_title="Power [p.u.]",
+            barmode="group",
+            height=450,
+        )
+
+        # fig.update_yaxes(range=[0.9, 1.05])
+
+        html_parts.append(f"<h2>Iteration {iteration}</h2>")
+        html_parts.append(
+            pio.to_html(
+                fig,
+                full_html=False,
+                include_plotlyjs="cdn" if k == 0 else False
+            )
+        )
+
+    html_parts.append("</body></html>")
+
+    with open(save_html, "w", encoding="utf-8") as f:
+        f.write("\n".join(html_parts))
+    print(f"saved to {save_html}")
+
+
+def write_line_current_multi_html(
+        records: list[dict],
+        eval_path: str,
+        html_name: str,
+        title: str
+) -> None:
+
+    save_path = os.path.join(eval_path, "line")
+    os.makedirs(save_path, exist_ok=True)
+
+    save_html = os.path.join(save_path, html_name)
+
+    df = pd.DataFrame(records)
+
+    if df.empty:
+        print(f"No records for {save_html}")
+        return
+
+    iterations = sorted(df["iteration"].unique())
+
+    html_parts = [
+        "<html><head><meta charset='utf-8'></head><body>",
+        f"<h1>{title}</h1>",
+    ]
+
+    for k, iteration in enumerate(iterations):
+        group = df[df["iteration"] == iteration]
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=group["line"],
+            y=group["powerflow"],
+            name="Powerflow",
+        ))
+
+        fig.add_trace(go.Bar(
+            x=group["line"],
+            y=group["estimated"],
+            name="Estimated",
+        ))
+
+        fig.update_layout(
+            title=f"Iteration {iteration}",
+            xaxis_title="Line",
+            yaxis_title="Current [p.u.]",
+            barmode="group",
+            height=450,
+        )
+
+        # fig.update_yaxes(range=[0.9, 1.05])
+
+        html_parts.append(f"<h2>Iteration {iteration}</h2>")
+        html_parts.append(
+            pio.to_html(
+                fig,
+                full_html=False,
+                include_plotlyjs="cdn" if k == 0 else False
+            )
+        )
+
+    html_parts.append("</body></html>")
+
+    with open(save_html, "w", encoding="utf-8") as f:
+        f.write("\n".join(html_parts))
+    print(f"saved to {save_html}")
+
+
 def evaluation_bus(data_path: str, eval_path: str):
     # -------------------------------------------------------------------------
     # Read in failures
@@ -1468,11 +1690,9 @@ def evaluation_bus(data_path: str, eval_path: str):
         "AF-LAV": af_lav_files,
     }
 
-    res_bus_dc = {solver: {} for solver in solver_ls}
-    res_bus_est_dc = {solver: {} for solver in solver_ls}
-
-    res_line_dc = {solver: {} for solver in solver_ls}
-    res_line_est_dc = {solver: {} for solver in solver_ls}
+    bus_voltage_records = {solver: [] for solver in solver_ls}
+    bus_active_power_records = {solver: [] for solver in solver_ls}
+    line_current_records = {solver: [] for solver in solver_ls}
 
     all_iterations = sorted(set().union(*[files.keys() for files in pkl_files_dc.values()]))
 
@@ -1495,7 +1715,48 @@ def evaluation_bus(data_path: str, eval_path: str):
                 print(f"missing res_bus_est: solver={solver}, iteration={i}")
                 continue
 
-    print(f"End")
+            i_base = net_ij.sn_mva / (np.sqrt(3) * net_ij.bus.loc[net_ij.line["from_bus"], "vn_kv"].values)
+
+            for bus_idx in net_ij.res_bus.index:
+                bus_voltage_records[solver].append({
+                    "iteration": f"{i:03d}",
+                    "bus": str(bus_idx),
+                    "powerflow": float(net_ij.res_bus.loc[bus_idx, "vm_pu"]),
+                    "estimated": float(net_ij.res_bus_est.loc[bus_idx, "vm_pu"])
+                })
+                bus_active_power_records[solver].append({
+                    "iteration": f"{i:03d}",
+                    "bus": str(bus_idx),
+                    "powerflow": float(net_ij.res_bus.loc[bus_idx, "p_mw"] / net_ij.sn_mva),
+                    "estimated": float(net_ij.res_bus_est.loc[bus_idx, "p_mw"] / net_ij.sn_mva)
+                })
+            for line_idx in net_ij.res_line.index:
+                line_current_records[solver].append({
+                    "iteration": f"{i:03d}",
+                    "line": str(line_idx),
+                    "powerflow": float(net_ij.res_line.loc[line_idx, "i_ka"] / i_base[line_idx]),
+                    "estimated": float(net_ij.res_line_est.loc[line_idx, "i_ka"] / i_base[line_idx])
+                })
+
+    for solver in solver_ls:
+        write_bus_voltage_multi_html(
+            bus_voltage_records[solver],
+            eval_path,
+            f"bus_voltages_{solver}.html",
+            f"Busspannungen je Iteration - {solver}",
+        )
+        write_bus_power_multi_html(
+            bus_active_power_records[solver],
+            eval_path,
+            f"bus_power_{solver}.html",
+            f"Busleistung je Iteration - {solver}"
+        )
+        write_line_current_multi_html(
+            line_current_records[solver],
+            eval_path,
+            f"line_current_{solver}.html",
+            f"Leitungsstrom je Iteration - {solver}"
+        )
 
 
 def show_af_simbench():
@@ -1541,19 +1802,19 @@ if __name__ == "__main__":
         subdir = "000"
         d_path = os.path.join(str(os.getenv("PATH_DATA_18BUS")), subdir)
         os.makedirs(d_path, exist_ok=True)
-        # create_random_18_bus_grid_random_estimation(
-        #     d_path,
-        #     100,
-        #     112,
-        #     False,
-        #     .01,
-        #     .01,
-        #     .01,
-        # )
+        create_random_18_bus_grid_random_estimation(
+            d_path,
+            100,
+            112,
+            False,
+            .01,
+            .01,
+            .01,
+        )
 
         e_path = os.path.join(str(os.getenv("PATH_EVAL_18BUS")), subdir)
-        # evaluation_af(d_path, e_path)
-        # evaluation_vp(d_path, e_path)
+        evaluation_af(d_path, e_path)
+        evaluation_vp(d_path, e_path)
         evaluation_bus(d_path, e_path)
 
     if simbench_b:
