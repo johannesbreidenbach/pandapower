@@ -1445,6 +1445,59 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0) ->
     print(f"saved html to: {html_ve_file}")
 
 
+def evaluation_bus(data_path: str, eval_path: str):
+    # -------------------------------------------------------------------------
+    # Read in failures
+    # -------------------------------------------------------------------------
+    failure_set = load_failures(data_path, eval_path)
+    # -------------------------------------------------------------------------
+    # Read in bus and line data from pickle
+    # -------------------------------------------------------------------------
+    solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
+
+    af_wls_path = os.path.join(data_path, "af_wls")
+    af_wls_files = collect_pickle_files(af_wls_path, "af_wls_")
+    af_wlav_path = os.path.join(data_path, "af_wlav")
+    af_wlav_files = collect_pickle_files(af_wlav_path, "af_wlav_")
+    af_lav_path = os.path.join(data_path, "af_lav")
+    af_lav_files = collect_pickle_files(af_lav_path, "af_lav_")
+
+    pkl_files_dc = {
+        "AF-WLS": af_wls_files,
+        "AF-WLAV": af_wlav_files,
+        "AF-LAV": af_lav_files,
+    }
+
+    res_bus_dc = {solver: {} for solver in solver_ls}
+    res_bus_est_dc = {solver: {} for solver in solver_ls}
+
+    res_line_dc = {solver: {} for solver in solver_ls}
+    res_line_est_dc = {solver: {} for solver in solver_ls}
+
+    all_iterations = sorted(set().union(*[files.keys() for files in pkl_files_dc.values()]))
+
+    for i in tqdm(all_iterations):
+        for solver in solver_ls:
+            if (solver, i) in failure_set:
+                print(f"skip failure: solver={solver}, iteration={i}")
+                continue
+            if i not in pkl_files_dc[solver]:
+                print(f"missing pickle: solver={solver}, iteration={i}")
+                continue
+
+            net_ij = from_pickle(pkl_files_dc[solver][i])
+
+            if not hasattr(net_ij, "res_bus"):
+                print(f"missing res_bus: solver={solver}, iteration={i}")
+                continue
+
+            if not hasattr(net_ij, "res_bus_est"):
+                print(f"missing res_bus_est: solver={solver}, iteration={i}")
+                continue
+
+    print(f"End")
+
+
 def show_af_simbench():
     simbench_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]
     for simbench_grid in simbench_grid_ls:
@@ -1488,19 +1541,20 @@ if __name__ == "__main__":
         subdir = "000"
         d_path = os.path.join(str(os.getenv("PATH_DATA_18BUS")), subdir)
         os.makedirs(d_path, exist_ok=True)
-        create_random_18_bus_grid_random_estimation(
-            d_path,
-            1000,
-            112,
-            False,
-            .01,
-            .01,
-            .01,
-        )
+        # create_random_18_bus_grid_random_estimation(
+        #     d_path,
+        #     100,
+        #     112,
+        #     False,
+        #     .01,
+        #     .01,
+        #     .01,
+        # )
 
         e_path = os.path.join(str(os.getenv("PATH_EVAL_18BUS")), subdir)
-        evaluation_af(d_path, e_path)
-        evaluation_vp(d_path, e_path)
+        # evaluation_af(d_path, e_path)
+        # evaluation_vp(d_path, e_path)
+        evaluation_bus(d_path, e_path)
 
     if simbench_b:
         sb_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]  #
