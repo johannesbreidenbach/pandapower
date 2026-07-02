@@ -153,6 +153,9 @@ def estimate(
                        zero_injection=zero_injection,
                        fuse_buses_with_bb_switch=fuse_buses_with_bb_switch,
                        debug_mode=debug_mode,
+                       init=init,
+                       tolerance=tolerance,
+                       maximum_iterations=maximum_iterations,
                        **opt_vars
                        )
 
@@ -231,7 +234,7 @@ class StateEstimation:
             net,
             tolerance=1e-6,
             maximum_iterations=50,
-            algorithm="wls",
+            algorithm: ALGORITHM_SE = "wls",
             logger=None,
             recycle=False
     ):
@@ -268,6 +271,9 @@ class StateEstimation:
              delta_start="flat",
              zero_injection=None,
              fuse_buses_with_bb_switch="all",
+             init: str = "flat",
+             tolerance: float = 1e-6,
+             maximum_iterations: int = 50,
              debug_mode=False,
              **opt_vars
     ) -> dict[str, object]:
@@ -302,6 +308,14 @@ class StateEstimation:
                     - iterable: the iterable should contain index of the zero injection bus and also aux bus will be
                         identified as zero-injection bus
 
+            init (string):
+                Initial voltage for the estimation. 'flat' sets 1.0 p.u. / 0° for all buses, 'results' uses the values
+                from *res_bus* if available and 'slack' considers the slack bus voltage (and optionally, angle) as the
+                initial values. Default is 'flat'
+            tolerance (float):
+                When the maximum state change between iterations is less than tolerance, the process stops. Default is
+                1e-6
+            maximum_iterations (integer): Maximum number of iterations. Default is 50
             fuse_buses_with_bb_switch (str, iterable, None):
                 Defines how buses with closed bb switches should be handled, if fuse buses will only fuse to one for
                 calculation, if not fuse, an auxiliary bus and auxiliary line will be automatically added to the network
@@ -355,9 +369,9 @@ class StateEstimation:
                 bus_to_be_fused = fuse_buses_with_bb_switch
             set_bb_switch_impedance(self.net, bus_to_be_fused)  # runpp() performed
 
-        af_init_value = opt_vars.get("af_init_value", OPT_VAR_DEFAULTS["af_init_value"])
         af_target_value = opt_vars.get("af_target_value", OPT_VAR_DEFAULTS["af_target_value"])
         af_std_value = opt_vars.get("af_std_value", OPT_VAR_DEFAULTS["af_std_value"])
+
         if (af_target_value is None) != (af_std_value is None):
             raise ValueError("af_target_value and af_std_value are both None or both not None.")
         self.net, self.ppc, self.eppci = pp2eppci(
@@ -365,11 +379,20 @@ class StateEstimation:
             v_start=v_start,
             delta_start=delta_start,
             calculate_voltage_angles=True,
-            zero_injection=zero_injection,
-            algorithm=self.algorithm,
             ppc=self.ppc,
             eppci=self.eppci,
-            af_init_value=af_init_value,
+            algorithm=self.algorithm,
+            init=init,
+            tolerance=tolerance,
+            maximum_iterations=maximum_iterations,
+            zero_injection=zero_injection,
+            fuse_buses_with_bb_switch=fuse_buses_with_bb_switch,
+            debug_mode=debug_mode,
+            estimator=opt_vars.get("estimator", OPT_VAR_DEFAULTS["estimator"]),
+            linprog_method=opt_vars.get("linprog_method", OPT_VAR_DEFAULTS["linprog_method"]),
+            wlav=opt_vars.get("wlav", OPT_VAR_DEFAULTS["wlav"]),
+            with_ortools=opt_vars.get("with_ortools", OPT_VAR_DEFAULTS["with_ortools"]),
+            af_init_value=opt_vars.get("af_init_value", OPT_VAR_DEFAULTS["af_init_value"]),
             af_target_value=af_target_value,
             af_std_value=af_std_value
         )

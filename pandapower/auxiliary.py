@@ -1546,15 +1546,15 @@ def _add_sc_options(
 
 def _add_se_options(
         net: pandapowerNet,
-        algorithm: "ALGORITHM_SE" = "wls",
+        algorithm_se: ALGORITHM_SE = "wls",
         init: str = "flat",
         tolerance: float = 1e-6,
         maximum_iterations: int = 50,
-        zero_injection="aux_bus",
-        fuse_buses_with_bb_switch="all",
+        zero_injection: str | Iterable | None = "aux_bus",
+        fuse_buses_with_bb_switch: str | Iterable | None = "all",
         debug_mode: bool = False,
         estimator: ESTIMATOR_SE_TYPES = "wls",
-        linprog_method: "LinprogMethod" = "highs",
+        linprog_method: LinprogMethod = "highs",
         wlav: bool = False,
         with_ortools: bool = True,
         af_init_value: float | np.ndarray = .5,
@@ -1563,7 +1563,7 @@ def _add_se_options(
 ) -> None:
 
     options = {
-        "algorithm": algorithm,
+        "algorithm_se": algorithm_se,
         "init": init,
         "tolerance": tolerance,
         "maximum_iterations": maximum_iterations,
@@ -2379,34 +2379,49 @@ def _init_runse_options(
     trafo_model: Literal["t", "pi"] = "t",
     trafo3w_losses: Literal["hv", "lv", "star"] = "hv",
     switch_rx_ratio: int = 2,
+    algorithm_se: ALGORITHM_SE = "wls",
+    init: str = "flat",
+    tolerance: float = 1e-6,
+    maximum_iterations: int = 50,
+    zero_injection: str | Iterable | None = "aux_bus",
+    fuse_buses_with_bb_switch: str | Iterable | None = "all",
+    debug_mode: bool = False,
+    estimator: ESTIMATOR_SE_TYPES = "wls",
+    linprog_method: LinprogMethod = "highs",
+    wlav: bool = False,
+    with_ortools: bool = True,
+    af_init_value: float | np.ndarray = .5,
+    af_target_value: float | np.ndarray | None = None,
+    af_std_value: float | np.ndarray | None = None,
     **kwargs: Any,
 ) -> None:
-    # ToDo: add here the state estimation parameter from _add_se_options()
+
     net._options = {}
     _add_ppc_options(net, calculate_voltage_angles=calculate_voltage_angles,
                      trafo_model=trafo_model, check_connectivity=check_connectivity,
                      mode="se", switch_rx_ratio=switch_rx_ratio, init_vm_pu=v_start,
                      init_va_degree=delta_start, enforce_q_lims=False, enforce_p_lims=False, recycle=None,
                      voltage_depend_loads=False, trafo3w_losses=trafo3w_losses)
+    _add_se_options(
+        net,
+        algorithm_se=algorithm_se,
+        init=init,
+        tolerance=tolerance,
+        maximum_iterations=maximum_iterations,
+        zero_injection=zero_injection,
+        fuse_buses_with_bb_switch=fuse_buses_with_bb_switch,
+        debug_mode=debug_mode,
+        estimator=estimator,
+        linprog_method=linprog_method,
+        wlav=wlav,
+        with_ortools=with_ortools,
+        af_init_value=af_init_value,
+        af_target_value=af_target_value,
+        af_std_value=af_std_value
+    )
     _add_pf_options(net, tolerance_mva=1e-8, trafo_loading="power",
                     numba=True, ac=True, algorithm="nr", max_iteration="auto",
-                    only_v_results=False)
-    # _add_se_options(
-    #     net,
-    #     algorithm= "wls",
-    #     init="flat",
-    #     tolerance=1e-6,
-    #     maximum_iterations=50,
-    #     zero_injection="aux_bus",
-    #     fuse_buses_with_bb_switch="all",
-    #     debug_mode=False,
-    #     estimator="wls",
-    #     linprog_method="highs",
-    #     wlav=False,
-    #     with_ortools=True,
-    #     af_init_value=.5,
-    #     af_target_value=None,
-    #     af_std_value=None)
+                    only_v_results=False) # ToDo: Attention/Check default values
 
 
 def _internal_stored(net: pandapowerNet, ac: bool = True) -> bool:

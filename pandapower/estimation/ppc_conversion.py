@@ -3,7 +3,8 @@
 
 
 from collections import UserDict
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -33,6 +34,10 @@ from pandapower.estimation.idx_brch import (P_FROM, P_FROM_IDX, P_FROM_STD,
                                             IM_TO, IM_TO_IDX, IM_TO_STD,
                                             IA_TO, IA_TO_IDX, IA_TO_STD,
                                             branch_cols_se)
+if TYPE_CHECKING:
+    from pandapower.estimation.state_estimation import ALGORITHM_SE
+    from pandapower.estimation.algorithm.base import ESTIMATOR_SE_TYPES
+    from pandapower.estimation.algorithm.lp import LinprogMethod
 
 import logging
 std_logger = logging.getLogger(__name__)
@@ -68,10 +73,47 @@ def _initialize_voltage(net, init):
     return v_start, delta_start
 
 
-def _init_ppc(net, v_start, delta_start, calculate_voltage_angles):
+def _init_ppc(
+        net,
+        v_start,
+        delta_start,
+        calculate_voltage_angles,
+        algorithm: ALGORITHM_SE = "wls",
+        init: str = "flat",
+        tolerance: float = 1e-6,
+        maximum_iterations: int = 50,
+        zero_injection: str | Iterable | None = "aux_bus",
+        fuse_buses_with_bb_switch: str | Iterable | None = "all",
+        debug_mode: bool = False,
+        estimator: ESTIMATOR_SE_TYPES = "wls",
+        linprog_method: LinprogMethod = "highs",
+        wlav: bool = False,
+        with_ortools: bool = True,
+        af_init_value: float | np.ndarray = .5,
+        af_target_value: float | np.ndarray | None = None,
+        af_std_value: float | np.ndarray | None = None,
+):
     # select elements in service and convert pandapower ppc to ppc
-    _init_runse_options(net, v_start=v_start, delta_start=delta_start,
-                        calculate_voltage_angles=calculate_voltage_angles)
+    _init_runse_options(
+        net,
+        v_start=v_start,
+        delta_start=delta_start,
+        calculate_voltage_angles=calculate_voltage_angles,
+        algorithm_se=algorithm,
+        init=init,
+        tolerance=tolerance,
+        maximum_iterations=maximum_iterations,
+        zero_injection=zero_injection,
+        fuse_buses_with_bb_switch=fuse_buses_with_bb_switch,
+        debug_mode=debug_mode,
+        estimator=estimator,
+        linprog_method=linprog_method,
+        wlav=wlav,
+        with_ortools=with_ortools,
+        af_init_value=af_init_value,
+        af_target_value=af_target_value,
+        af_std_value=af_std_value
+    )
     ppc, ppci = _pd2ppc(net)
 
     # do dc power flow for phase shifting transformers
@@ -736,10 +778,19 @@ def pp2eppci(
         v_start=None,
         delta_start=None,
         calculate_voltage_angles: bool = True,
-        zero_injection="aux_bus",
-        algorithm: str = "wls",
+        zero_injection: str | Iterable | None = "aux_bus",
+        algorithm: ALGORITHM_SE = "wls",
         ppc=None,
         eppci=None,
+        init: str = "flat",
+        tolerance: float = 1e-6,
+        maximum_iterations: int = 50,
+        fuse_buses_with_bb_switch: str | Iterable | None = "all",
+        debug_mode: bool = False,
+        estimator: ESTIMATOR_SE_TYPES = "wls",
+        linprog_method: LinprogMethod = "highs",
+        wlav: bool = False,
+        with_ortools: bool = True,
         af_init_value: float | np.ndarray = .5,
         af_target_value: float | np.ndarray | None = None,
         af_std_value: float | np.ndarray | None = None,
@@ -751,7 +802,26 @@ def pp2eppci(
         return net, ppc, eppci
     else:
         # initialize ppc
-        ppc, ppci = _init_ppc(net, v_start, delta_start, calculate_voltage_angles)
+        ppc, ppci = _init_ppc(
+            net,
+            v_start,
+            delta_start,
+            calculate_voltage_angles,
+            algorithm=algorithm,
+            init=init,
+            tolerance=tolerance,
+            maximum_iterations=maximum_iterations,
+            zero_injection=zero_injection,
+            fuse_buses_with_bb_switch=fuse_buses_with_bb_switch,
+            debug_mode=debug_mode,
+            estimator=estimator,
+            linprog_method=linprog_method,
+            wlav=wlav,
+            with_ortools=with_ortools,
+            af_init_value=af_init_value,
+            af_target_value=af_target_value,
+            af_std_value=af_std_value
+        )
 
         # add measurements to ppci structure
         # Finished converting pandapower network to ppci
