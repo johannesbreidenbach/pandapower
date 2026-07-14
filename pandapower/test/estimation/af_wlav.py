@@ -1536,7 +1536,8 @@ def write_bus_power_multi_html(
         records: list[dict],
         eval_path: str,
         html_name: str,
-        title: str
+        title: str,
+        hide_s_bus: bool = False
 ) -> None:
     save_path = os.path.join(eval_path, "bus")
     os.makedirs(save_path, exist_ok=True)
@@ -1558,6 +1559,9 @@ def write_bus_power_multi_html(
 
     for k, iteration in enumerate(iterations):
         group = df[df["iteration"] == iteration]
+
+        if hide_s_bus:
+            group = group[group["bus"] != "0"]
 
         fig = go.Figure()
 
@@ -1748,8 +1752,9 @@ def evaluation_bus(data_path: str, eval_path: str):
         write_bus_power_multi_html(
             bus_active_power_records[solver],
             eval_path,
-            f"bus_power_{solver}.html",
-            f"Busleistung je Iteration - {solver}"
+            f"bus_power_without_slack{solver}.html",
+            f"Busleistung je Iteration - {solver}",
+            True
         )
         write_line_current_multi_html(
             line_current_records[solver],
@@ -1770,6 +1775,182 @@ def show_af_simbench():
             f"Allocation Factors Static Generator{net_simbench.sgen["type"].unique()}\n"
             f"Number of buses: {len(net_simbench.bus)}\n"
         )
+
+
+def load_neg_af_not_in_failures(
+    data_neg_path: str = ".",
+    data_pos_path: str = ".",
+    eval_path: str = "."
+) -> set[tuple[str, int]]:
+    """
+    Load entries from neg_af.txt that are not present in failures.txt.
+
+    Returns:
+        Set of (solver, iteration) tuples that occur in neg_af.txt
+        but not in failures.txt.
+    """
+
+    failures_neg = pd.read_csv(
+        os.path.join(data_neg_path, "failures.txt"),
+        header=None,
+        names=["solver", "iteration", "status"],
+        skipinitialspace=True,
+        dtype={"solver": str, "iteration": str, "status": str}
+    )
+    failures_neg["iteration"] = failures_neg["iteration"].astype(int)
+
+    failures_pos = pd.read_csv(
+        os.path.join(data_pos_path, "failures.txt"),
+        header=None,
+        names=["solver", "iteration", "status"],
+        skipinitialspace=True,
+        dtype={"solver": str, "iteration": str, "status": str}
+    )
+    failures_pos["iteration"] = failures_pos["iteration"].astype(int)
+
+    neg_af = pd.read_csv(
+        os.path.join(data_neg_path, "neg_af.txt"),
+        header=None,
+        names=["solver", "iteration", "status"],
+        skipinitialspace=True,
+        dtype={"solver": str, "iteration": str, "status": str}
+    )
+    neg_af["iteration"] = neg_af["iteration"].astype(int)
+
+    failures_neg_set = set(zip(failures_neg["solver"], failures_neg["iteration"]))
+    failures_pos_set = set(zip(failures_pos["solver"], failures_pos["iteration"]))
+
+    neg_af_set = set(zip(neg_af["solver"], neg_af["iteration"]))
+
+    result_set = neg_af_set - failures_neg_set - failures_pos_set
+
+    result_df = pd.DataFrame(
+        sorted(result_set),
+        columns=["solver", "iteration"]
+    )
+
+    result_csv = os.path.join(eval_path, "neg_af_not_in_failures.csv")
+    if os.path.exists(result_csv):
+        print(f"file {result_csv} exists, ignoring")
+    else:
+        result_df.to_csv(result_csv, index=False)
+
+    return result_set
+
+
+def eval_neg_af(
+        d_pos_path: str,
+        d_neg_path: str,
+        e_pos_path: str,
+        e_neg_path: str
+) -> None:
+
+    neg_af_set = load_neg_af_not_in_failures(d_neg_path, d_pos_path, e_neg_path)
+
+    solver_ls = ["AF-WLAV", "AF-LAV"]
+
+
+    af_neg_wlav_path = os.path.join(d_neg_path, "af_wlav")
+    af_neg_wlav_files = collect_pickle_files(af_neg_wlav_path, "af_wlav_")
+
+    af_neg_lav_path = os.path.join(d_neg_path, "af_lav")
+    af_neg_lav_files = collect_pickle_files(af_neg_lav_path, "af_lav_")
+
+    pkl_files_neg_dc = {
+        "AF-WLAV": af_neg_wlav_files,
+        "AF-LAV": af_neg_lav_files,
+    }
+
+    af_pos_wlav_path = os.path.join(d_pos_path, "af_wlav")
+    af_pos_wlav_files = collect_pickle_files(af_pos_wlav_path, "af_wlav_")
+    af_pos_lav_path = os.path.join(d_pos_path, "af_lav")
+    af_pos_lav_files = collect_pickle_files(af_pos_lav_path, "af_lav_")
+
+    pkl_files_pos_dc = {
+        "AF-WLAV": af_pos_wlav_files,
+        "AF-LAV": af_pos_lav_files,
+    }
+
+    bus_voltage_records = {
+        "neg": {solver: [] for solver in solver_ls},
+        "pos": {solver: [] for solver in solver_ls},
+    }
+
+    bus_active_power_records = {
+        "neg": {solver: [] for solver in solver_ls},
+        "pos": {solver: [] for solver in solver_ls},
+    }
+
+    line_current_records = {
+        "neg": {solver: [] for solver in solver_ls},
+        "pos": {solver: [] for solver in solver_ls},
+    }
+
+    pkl_files_by_case = {
+        "neg": pkl_files_neg_dc,
+        "pos": pkl_files_pos_dc,
+    }
+
+    for solver, i in tqdm(sorted(neg_af_set, key=lambda x: (x[0], x[1]))):
+
+        if solver not in solver_ls:
+            print(f"unknown solver: solver={solver}, iteration={i:03d}")
+            continue
+
+        for case_name, pkl_files_dc in pkl_files_by_case.items():
+
+            if i not in pkl_files_dc[solver]:
+                print(f"missing pickle: case={case_name}, solver={solver}, iteration={i:03d}")
+                continue
+
+            net_ij = from_pickle(pkl_files_dc[solver][i])
+
+            if not hasattr(net_ij, "res_bus"):
+                print(f"missing res_bus: case={case_name}, solver={solver}, iteration={i:03d}")
+                continue
+
+            if not hasattr(net_ij, "res_bus_est"):
+                print(f"missing res_bus_est: case={case_name}, solver={solver}, iteration={i:03d}")
+                continue
+
+            if not hasattr(net_ij, "res_line"):
+                print(f"missing res_line: case={case_name}, solver={solver}, iteration={i:03d}")
+                continue
+
+            if not hasattr(net_ij, "res_line_est"):
+                print(f"missing res_line_est: case={case_name}, solver={solver}, iteration={i:03d}")
+                continue
+
+            i_base = net_ij.sn_mva / (np.sqrt(3) * net_ij.bus.loc[net_ij.line["from_bus"], "vn_kv"].values)
+
+            for bus_idx in net_ij.res_bus.index:
+                bus_voltage_records[case_name][solver].append({
+                    "iteration": f"{i:03d}",
+                    "bus": str(bus_idx),
+                    "powerflow": float(net_ij.res_bus.loc[bus_idx, "vm_pu"]),
+                    "estimated": float(net_ij.res_bus_est.loc[bus_idx, "vm_pu"]),
+                })
+
+                bus_active_power_records[case_name][solver].append({
+                    "iteration": f"{i:03d}",
+                    "bus": str(bus_idx),
+                    "powerflow": float(net_ij.res_bus.loc[bus_idx, "p_mw"] / net_ij.sn_mva),
+                    "estimated": float(net_ij.res_bus_est.loc[bus_idx, "p_mw"] / net_ij.sn_mva),
+                })
+
+            for line_idx in net_ij.res_line.index:
+                line_current_records[case_name][solver].append({
+                    "iteration": f"{i:03d}",
+                    "line": str(line_idx),
+                    "powerflow": float(
+                        net_ij.res_line.loc[line_idx, "i_ka"] / i_base[line_idx]
+                    ),
+                    "estimated": float(
+                        net_ij.res_line_est.loc[line_idx, "i_ka"] / i_base[line_idx]
+                    ),
+                })
+
+    print(f"ende")
 
 
 if __name__ == "__main__":
@@ -1799,7 +1980,9 @@ if __name__ == "__main__":
         _add_measurements_af(net30, 112, 5, .0, .0, .0)
 
     if bus18_b:
-        subdir = "000"
+        subdir = "003"
+        pos_dir = "002"
+        neg_dir = "003"
         d_path = os.path.join(str(os.getenv("PATH_DATA_18BUS")), subdir)
         os.makedirs(d_path, exist_ok=True)
         create_random_18_bus_grid_random_estimation(
@@ -1813,6 +1996,12 @@ if __name__ == "__main__":
         )
 
         e_path = os.path.join(str(os.getenv("PATH_EVAL_18BUS")), subdir)
+        eval_neg_af(
+            os.path.join(str(os.getenv("PATH_DATA_18BUS")), pos_dir),
+            os.path.join(str(os.getenv("PATH_DATA_18BUS")), neg_dir),
+            os.path.join(str(os.getenv("PATH_EVAL_18BUS")), pos_dir),
+            os.path.join(str(os.getenv("PATH_EVAL_18BUS")), neg_dir)
+        )
         evaluation_af(d_path, e_path)
         evaluation_vp(d_path, e_path)
         evaluation_bus(d_path, e_path)
