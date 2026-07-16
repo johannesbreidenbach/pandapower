@@ -1469,7 +1469,8 @@ def write_bus_voltage_multi_html(
         records: list[dict],
         eval_path: str,
         html_name: str,
-        title: str
+        title: str,
+        neg_af_bool: bool = False
 ) -> None:
     save_path = os.path.join(eval_path, "bus")
     os.makedirs(save_path, exist_ok=True)
@@ -1480,6 +1481,10 @@ def write_bus_voltage_multi_html(
 
     if df.empty:
         print(f"No records for {save_html}")
+        return
+
+    if neg_af_bool and "case" not in df.columns:
+        print(f"Missing column 'case' for neg_af plot: {save_html}")
         return
 
     iterations = sorted(df["iteration"].unique())
@@ -1494,24 +1499,70 @@ def write_bus_voltage_multi_html(
 
         fig = go.Figure()
 
-        fig.add_trace(go.Scatter(
-            x=group["bus"],
-            y=group["powerflow"],
-            name="Powerflow",
-        ))
+        if neg_af_bool:
+            group = group.copy()
+            group["bus_sort"] = group["bus"].astype(int)
+            group = group.sort_values(["bus_sort", "case"])
 
-        fig.add_trace(go.Scatter(
-            x=group["bus"],
-            y=group["estimated"],
-            name="Estimated",
-        ))
+            neg_group = group[group["case"] == "neg"]
+            pos_group = group[group["case"] == "pos"]
+
+            colors = {
+                "powerflow": "rgba(120, 120, 120, 0.75)",
+                "neg_estimated": "rgba(31, 119, 180, 0.95)",
+                "pos_estimated": "rgba(255, 127, 14, 0.95)",
+            }
+
+            if not neg_group.empty:
+                fig.add_trace(go.Scatter(
+                    x=neg_group["bus"],
+                    y=neg_group["powerflow"],
+                    name="Powerflow",
+                    mode="lines+markers",
+                    line=dict(color=colors["powerflow"], dash="dash"),
+                    marker=dict(color=colors["powerflow"]),
+                ))
+
+                fig.add_trace(go.Scatter(
+                    x=neg_group["bus"],
+                    y=neg_group["estimated"],
+                    name="neg Estimated",
+                    mode="lines+markers",
+                    line=dict(color=colors["neg_estimated"]),
+                    marker=dict(color=colors["neg_estimated"]),
+                ))
+
+            if not pos_group.empty:
+                fig.add_trace(go.Scatter(
+                    x=pos_group["bus"],
+                    y=pos_group["estimated"],
+                    name="pos Estimated",
+                    mode="lines+markers",
+                    line=dict(color=colors["pos_estimated"]),
+                    marker=dict(color=colors["pos_estimated"]),
+                ))
+
+        else:
+            fig.add_trace(go.Scatter(
+                x=group["bus"],
+                y=group["powerflow"],
+                name="Powerflow",
+                mode="lines+markers",
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=group["bus"],
+                y=group["estimated"],
+                name="Estimated",
+                mode="lines+markers",
+            ))
 
         fig.update_layout(
             title=f"Iteration {iteration}",
             xaxis_title="Bus",
             yaxis_title="Spannung [p.u.]",
-            barmode="group",
             height=450,
+            legend_title="Daten",
         )
 
         # fig.update_yaxes(range=[0.9, 1.05])
@@ -1537,7 +1588,8 @@ def write_bus_power_multi_html(
         eval_path: str,
         html_name: str,
         title: str,
-        hide_s_bus: bool = False
+        hide_s_bus: bool = False,
+        neg_af_bool: bool = False
 ) -> None:
     save_path = os.path.join(eval_path, "bus")
     os.makedirs(save_path, exist_ok=True)
@@ -1548,6 +1600,10 @@ def write_bus_power_multi_html(
 
     if df.empty:
         print(f"No records for {save_html}")
+        return
+
+    if neg_af_bool and "case" not in df.columns:
+        print(f"Missing column 'case' for neg_af plot: {save_html}")
         return
 
     iterations = sorted(df["iteration"].unique())
@@ -1565,17 +1621,58 @@ def write_bus_power_multi_html(
 
         fig = go.Figure()
 
-        fig.add_trace(go.Bar(
-            x=group["bus"],
-            y=group["powerflow"],
-            name="Powerflow",
-        ))
+        if neg_af_bool:
+            group = group.copy()
+            group["bus_sort"] = group["bus"].astype(int)
+            group = group.sort_values(["bus_sort", "case"])
 
-        fig.add_trace(go.Bar(
-            x=group["bus"],
-            y=group["estimated"],
-            name="Estimated",
-        ))
+            neg_group = group[group["case"] == "neg"]
+            pos_group = group[group["case"] == "pos"]
+
+            colors = {
+                "powerflow": "rgba(120, 120, 120, 0.45)",
+                "neg_estimated": "rgba(31, 119, 180, 0.85)",
+                "pos_estimated": "rgba(255, 127, 14, 0.85)",
+            }
+
+            if not neg_group.empty:
+                fig.add_trace(go.Bar(
+                    x=neg_group["bus"],
+                    y=neg_group["powerflow"],
+                    name="Powerflow",
+                    offsetgroup="powerflow",
+                    marker_color=colors["powerflow"],
+                ))
+
+                fig.add_trace(go.Bar(
+                    x=neg_group["bus"],
+                    y=neg_group["estimated"],
+                    name="neg Estimated",
+                    offsetgroup="neg_estimated",
+                    marker_color=colors["neg_estimated"],
+                ))
+
+            if not pos_group.empty:
+                fig.add_trace(go.Bar(
+                    x=pos_group["bus"],
+                    y=pos_group["estimated"],
+                    name="pos Estimated",
+                    offsetgroup="pos_estimated",
+                    marker_color=colors["pos_estimated"],
+                ))
+
+        else:
+            fig.add_trace(go.Bar(
+                x=group["bus"],
+                y=group["powerflow"],
+                name="Powerflow",
+            ))
+
+            fig.add_trace(go.Bar(
+                x=group["bus"],
+                y=group["estimated"],
+                name="Estimated",
+            ))
 
         fig.update_layout(
             title=f"Iteration {iteration}",
@@ -1583,9 +1680,8 @@ def write_bus_power_multi_html(
             yaxis_title="Power [p.u.]",
             barmode="group",
             height=450,
+            legend_title="Daten",
         )
-
-        # fig.update_yaxes(range=[0.9, 1.05])
 
         html_parts.append(f"<h2>Iteration {iteration}</h2>")
         html_parts.append(
@@ -1607,7 +1703,8 @@ def write_line_current_multi_html(
         records: list[dict],
         eval_path: str,
         html_name: str,
-        title: str
+        title: str,
+        neg_af_bool: bool = False
 ) -> None:
 
     save_path = os.path.join(eval_path, "line")
@@ -1619,6 +1716,10 @@ def write_line_current_multi_html(
 
     if df.empty:
         print(f"No records for {save_html}")
+        return
+
+    if neg_af_bool and "case" not in df.columns:
+        print(f"Missing column 'case' for neg_af plot: {save_html}")
         return
 
     iterations = sorted(df["iteration"].unique())
@@ -1633,17 +1734,58 @@ def write_line_current_multi_html(
 
         fig = go.Figure()
 
-        fig.add_trace(go.Bar(
-            x=group["line"],
-            y=group["powerflow"],
-            name="Powerflow",
-        ))
+        if neg_af_bool:
+            group = group.copy()
+            group["line_sort"] = group["line"].astype(int)
+            group = group.sort_values(["line_sort", "case"])
 
-        fig.add_trace(go.Bar(
-            x=group["line"],
-            y=group["estimated"],
-            name="Estimated",
-        ))
+            neg_group = group[group["case"] == "neg"]
+            pos_group = group[group["case"] == "pos"]
+
+            colors = {
+                "powerflow": "rgba(120, 120, 120, 0.45)",
+                "neg_estimated": "rgba(31, 119, 180, 0.85)",
+                "pos_estimated": "rgba(255, 127, 14, 0.85)",
+            }
+
+            if not neg_group.empty:
+                fig.add_trace(go.Bar(
+                    x=neg_group["line"],
+                    y=neg_group["powerflow"],
+                    name="Powerflow",
+                    offsetgroup="powerflow",
+                    marker_color=colors["powerflow"],
+                ))
+
+                fig.add_trace(go.Bar(
+                    x=neg_group["line"],
+                    y=neg_group["estimated"],
+                    name="neg Estimated",
+                    offsetgroup="neg_estimated",
+                    marker_color=colors["neg_estimated"],
+                ))
+
+            if not pos_group.empty:
+                fig.add_trace(go.Bar(
+                    x=pos_group["line"],
+                    y=pos_group["estimated"],
+                    name="pos Estimated",
+                    offsetgroup="pos_estimated",
+                    marker_color=colors["pos_estimated"],
+                ))
+
+        else:
+            fig.add_trace(go.Bar(
+                x=group["line"],
+                y=group["powerflow"],
+                name="Powerflow",
+            ))
+
+            fig.add_trace(go.Bar(
+                x=group["line"],
+                y=group["estimated"],
+                name="Estimated",
+            ))
 
         fig.update_layout(
             title=f"Iteration {iteration}",
@@ -1651,6 +1793,7 @@ def write_line_current_multi_html(
             yaxis_title="Current [p.u.]",
             barmode="group",
             height=450,
+            legend_title="Daten",
         )
 
         # fig.update_yaxes(range=[0.9, 1.05])
@@ -1765,17 +1908,20 @@ def evaluation_bus(data_path: str, eval_path: str):
 
 
 def show_af_simbench():
-    simbench_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]
-    for simbench_grid in simbench_grid_ls:
+    simbench_grid_ls = sb.collect_all_simbench_codes()
+    sb_grid_ls_3 = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]
+    for simbench_grid in tqdm(simbench_grid_ls):
         net_simbench = sb.get_simbench_net(simbench_grid)
-        print(
-            f"Grid: {net_simbench}\n"
-            f"Allocation Factors Load: {net_simbench.load["type"].unique()}\n"
-            f"Allocation Factors Generator: {net_simbench.gen["type"].unique()}\n"
-            f"Allocation Factors Static Generator{net_simbench.sgen["type"].unique()}\n"
-            f"Number of buses: {len(net_simbench.bus)}\n"
-        )
-
+        if len(net_simbench.bus) <= 200:
+            print(
+                f"Grid: {net_simbench}\n"
+                f"Allocation Factors Load: {net_simbench.load["type"].unique()}\n"
+                f"Allocation Factors Generator: {net_simbench.gen["type"].unique()}\n"
+                f"Allocation Factors Static Generator{net_simbench.sgen["type"].unique()}\n"
+                f"Number of buses: {len(net_simbench.bus)}\n"
+            )
+        else:
+            print(f"Grid: {simbench_grid} to big.")
 
 def load_neg_af_not_in_failures(
     data_neg_path: str = ".",
@@ -1921,12 +2067,20 @@ def eval_neg_af(
                 print(f"missing res_line_est: case={case_name}, solver={solver}, iteration={i:03d}")
                 continue
 
-            i_base = net_ij.sn_mva / (np.sqrt(3) * net_ij.bus.loc[net_ij.line["from_bus"], "vn_kv"].values)
+            i_base = pd.Series(
+                net_ij.sn_mva / (np.sqrt(3) * net_ij.bus.loc[net_ij.line["from_bus"], "vn_kv"].values),
+                index=net_ij.line.index
+            )
 
             for bus_idx in net_ij.res_bus.index:
+                if not net_ij.res_bus.index.equals(net_ij.res_bus_est.index):
+                    print(f"bus index mismatch: case={case_name}, solver={solver}, iteration={i:03d}")
+                    continue
+
                 bus_voltage_records[case_name][solver].append({
                     "iteration": f"{i:03d}",
                     "bus": str(bus_idx),
+                    "case": case_name,
                     "powerflow": float(net_ij.res_bus.loc[bus_idx, "vm_pu"]),
                     "estimated": float(net_ij.res_bus_est.loc[bus_idx, "vm_pu"]),
                 })
@@ -1934,14 +2088,19 @@ def eval_neg_af(
                 bus_active_power_records[case_name][solver].append({
                     "iteration": f"{i:03d}",
                     "bus": str(bus_idx),
+                    "case": case_name,
                     "powerflow": float(net_ij.res_bus.loc[bus_idx, "p_mw"] / net_ij.sn_mva),
                     "estimated": float(net_ij.res_bus_est.loc[bus_idx, "p_mw"] / net_ij.sn_mva),
                 })
 
             for line_idx in net_ij.res_line.index:
+                if not net_ij.res_line.index.equals(net_ij.res_line_est.index):
+                    print(f"line index mismatch: case={case_name}, solver={solver}, iteration={i:03d}")
+                    continue
                 line_current_records[case_name][solver].append({
                     "iteration": f"{i:03d}",
                     "line": str(line_idx),
+                    "case": case_name,
                     "powerflow": float(
                         net_ij.res_line.loc[line_idx, "i_ka"] / i_base[line_idx]
                     ),
@@ -1950,6 +2109,54 @@ def eval_neg_af(
                     ),
                 })
 
+    combined_bus_voltage_records = {solver: [] for solver in solver_ls}
+    combined_bus_active_power_records = {solver: [] for solver in solver_ls}
+    combined_line_current_records = {solver: [] for solver in solver_ls}
+
+    for solver in solver_ls:
+        combined_bus_voltage_records[solver] = (
+                bus_voltage_records["neg"][solver]
+                + bus_voltage_records["pos"][solver]
+        )
+
+        combined_bus_active_power_records[solver] = (
+                bus_active_power_records["neg"][solver]
+                + bus_active_power_records["pos"][solver]
+        )
+
+        combined_line_current_records[solver] = (
+                line_current_records["neg"][solver]
+                + line_current_records["pos"][solver]
+        )
+
+    eval_path = os.path.join(e_neg_path, "pos_neg_combined")
+    os.makedirs(eval_path, exist_ok=True)
+
+    for solver in solver_ls:
+        write_bus_voltage_multi_html(
+            combined_bus_voltage_records[solver],
+            eval_path,
+            f"bus_voltages_pos_neg_{solver}.html",
+            f"Busspannungen je Iteration - pos/neg - {solver}",
+            neg_af_bool=True
+        )
+
+        write_bus_power_multi_html(
+            combined_bus_active_power_records[solver],
+            eval_path,
+            f"bus_power_without_slack_pos_neg_{solver}.html",
+            f"Busleistung je Iteration - pos/neg - {solver}",
+            hide_s_bus=True,
+            neg_af_bool=True
+        )
+
+        write_line_current_multi_html(
+            combined_line_current_records[solver],
+            eval_path,
+            f"line_current_pos_neg_{solver}.html",
+            f"Leitungsstrom je Iteration - pos/neg - {solver}",
+            neg_af_bool=True
+        )
     print(f"ende")
 
 
@@ -1961,6 +2168,7 @@ if __name__ == "__main__":
     ieee14_b: bool = False
     ieee30_b: bool = False
     bus18_b: bool = True
+    eval_18bus_b: bool = True
     simbench_b: bool = False
 
     if mv_b:
@@ -1981,10 +2189,10 @@ if __name__ == "__main__":
 
     if bus18_b:
         subdir = "003"
-        pos_dir = "002"
-        neg_dir = "003"
+
         d_path = os.path.join(str(os.getenv("PATH_DATA_18BUS")), subdir)
         os.makedirs(d_path, exist_ok=True)
+
         create_random_18_bus_grid_random_estimation(
             d_path,
             100,
@@ -1996,15 +2204,20 @@ if __name__ == "__main__":
         )
 
         e_path = os.path.join(str(os.getenv("PATH_EVAL_18BUS")), subdir)
+        evaluation_af(d_path, e_path)
+        evaluation_vp(d_path, e_path)
+        evaluation_bus(d_path, e_path)
+
+    if eval_18bus_b:
+        pos_dir = "002"
+        neg_dir = "003"
+
         eval_neg_af(
             os.path.join(str(os.getenv("PATH_DATA_18BUS")), pos_dir),
             os.path.join(str(os.getenv("PATH_DATA_18BUS")), neg_dir),
             os.path.join(str(os.getenv("PATH_EVAL_18BUS")), pos_dir),
             os.path.join(str(os.getenv("PATH_EVAL_18BUS")), neg_dir)
         )
-        evaluation_af(d_path, e_path)
-        evaluation_vp(d_path, e_path)
-        evaluation_bus(d_path, e_path)
 
     if simbench_b:
         sb_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]  #
@@ -2036,6 +2249,11 @@ if __name__ == "__main__":
             evaluation_vp(d_path, e_path)
             # net_sb.measurement.drop(net_sb.measurement.index, inplace=True)
             print(f"finished: {sb_grid}")
+
+    sim_bool = False
+    if sim_bool:
+        net_sb_test = sb.get_simbench_net("1-MVLV-semiurb--0-sw")
+
     runtime = time.perf_counter() - time_start
     print(f"calculated in: {timedelta(seconds=runtime)}")
     print(f"you shall not pass")
