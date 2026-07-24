@@ -745,6 +745,7 @@ def _calc_different_se(
         neg_af: list,
         num_it: str,
         with_ortools: bool = True,
+        with_wls: bool = True,
         data_path: str = ".") -> None:
     """
     un three different allocation-factor-based state estimation methods (AF-WLS, AF-WLAV, AF-LAV) for a specific power
@@ -767,32 +768,35 @@ def _calc_different_se(
         neg_af: List where information about negative af will save.
         num_it: Identifier for this run (e.g. iteration counter) used in all output filenames.
         with_ortools: OR-Tools solver for linear solver ("lp" algorithm). False take scipy solver.
+        with_wls: WLS include by true
         data_path: Directory where the PICKLE and CSV result files are stored.
 
     Returns:
         None
     """
-    af_wls = None
+    if with_wls:
+        af_wls = None
     af_lav = None
     af_wlav = None
 
-    # run AF-WLS estimation
-    af_wls_path = os.path.join(data_path, "af_wls")
-    os.makedirs(af_wls_path, exist_ok=True)
-    af_wls_file = os.path.join(af_wls_path, f"af_wls_{num_it}.p")
-    if os.path.exists(af_wls_file):
-        print(f"file {af_wls_file} already exists")
-    else:
-        try:
-            net_af_wls = copy.deepcopy(net_base)
-            af_wls = estimate(net_af_wls, algorithm="af-wls", wlav=False)  # , af_target_value=.4, af_std_value=.15
-            af_wls["allocation_factors"].index = ["AF-WLS"]  # set index for saving data
-            if not af_wls["success"]:
-                failures.append(f"AF-WLS, {num_it}, se failed")  # add failures information to a list
-            to_pickle(net_af_wls, af_wls_file)  # save grid to pickle
-        except Exception as e:
-            failures.append(f"AF-WLS, {num_it}, exception {type(e).__name__}: {e}")
-            print(f"AF-WLS iteration {num_it} crashed: {type(e).__name__}: {e}")
+    if with_wls:
+        # run AF-WLS estimation
+        af_wls_path = os.path.join(data_path, "af_wls")
+        os.makedirs(af_wls_path, exist_ok=True)
+        af_wls_file = os.path.join(af_wls_path, f"af_wls_{num_it}.p")
+        if os.path.exists(af_wls_file):
+            print(f"file {af_wls_file} already exists")
+        else:
+            try:
+                net_af_wls = copy.deepcopy(net_base)
+                af_wls = estimate(net_af_wls, algorithm="af-wls", wlav=False)  # , af_target_value=.4, af_std_value=.15
+                af_wls["allocation_factors"].index = ["AF-WLS"]  # set index for saving data
+                if not af_wls["success"]:
+                    failures.append(f"AF-WLS, {num_it}, se failed")  # add failures information to a list
+                to_pickle(net_af_wls, af_wls_file)  # save grid to pickle
+            except Exception as e:
+                failures.append(f"AF-WLS, {num_it}, exception {type(e).__name__}: {e}")
+                print(f"AF-WLS iteration {num_it} crashed: {type(e).__name__}: {e}")
 
     # run LAV estimation
     af_lav_path = os.path.join(data_path, "af_lav")
@@ -847,7 +851,11 @@ def _calc_different_se(
     else:
         col = None
         # If one solver return allocation factors (af) their names will read out
-        for af in [af_wls, af_wlav, af_lav]:
+        if with_wls:
+            af_ls = [af_wls, af_wlav, af_lav]
+        else:
+            af_ls = [af_wlav, af_lav]
+        for af in af_ls:
             if af is not None:
                 col = af["allocation_factors"].columns
                 break
@@ -856,10 +864,11 @@ def _calc_different_se(
             print(f"No allocation factors available for iteration {num_it}")
             return
         # The solver which have None values get an DataFrame with None
-        if af_wls is None:
-            af_wls_df = pd.DataFrame([[None] * len(col)], columns=col, index=["AF-WLS"])
-        else:
-            af_wls_df = af_wls["allocation_factors"]
+        if with_wls:
+            if af_wls is None:
+                af_wls_df = pd.DataFrame([[None] * len(col)], columns=col, index=["AF-WLS"])
+            else:
+                af_wls_df = af_wls["allocation_factors"]
         if af_lav is None:
             af_lav_df = pd.DataFrame([[None] * len(col)], columns=col, index=["AF-LAV"])
         else:
@@ -869,7 +878,10 @@ def _calc_different_se(
         else:
             af_wlav_df = af_wlav["allocation_factors"]
         # all dataframes with af form all solvers will concat to one
-        res_af_df = pd.concat([af_wls_df, af_wlav_df, af_lav_df])
+        if with_wls:
+            res_af_df = pd.concat([af_wls_df, af_wlav_df, af_lav_df])
+        else:
+            res_af_df = pd.concat([af_wlav_df, af_lav_df])
         res_af_df.to_csv(res_af_file, index=True)
 
 
@@ -878,6 +890,7 @@ def create_random_18_bus_grid_random_estimation(
         itr: int = 1000,
         seed: int = 112,
         with_ortools: bool = True,
+        with_wls: bool = True,
         rv: float = .01,
         rp: float = .03,
         rq: float = .03,
@@ -896,6 +909,7 @@ def create_random_18_bus_grid_random_estimation(
         seed:
             Optional random seed for reproducible simulations. If ``None``, random values are generated for every call.
         with_ortools: OR-Tools solver for linear solver ("lp" algorithm). False take scipy solver.
+        with_wls: for :func:`_calc_different_se` if true wls solver will be used.
         rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
         rp: standard deviation to apply a multiplicative perturbation to quantities for active power
         rq: standard deviation to apply a multiplicative perturbation to quantities for reactive power
@@ -919,7 +933,7 @@ def create_random_18_bus_grid_random_estimation(
             load_range=load_range, com_range=com_range, pv_range=pv_range, wind_range=wind_range
         )
         _create_measurement_18_bus_grid(net=net18, rv=rv, rp=rp, rq=rq)  #
-        _calc_different_se(net18, failures, neg_af, name_str, with_ortools, data_path)
+        _calc_different_se(net18, failures, neg_af, name_str, with_ortools, with_wls, data_path)
 
     # If failures and negative af are not empty, the list will save as txt file.
     if not failures:
@@ -947,6 +961,7 @@ def create_random_estimations_simbench(
         seed_pf: int | None = None,
         seed_m: int | None = None,
         with_ortools: bool = True,
+        with_wls: bool = True,
         rv: float = .01,
         ri: float = .01,
         rp: float = .03,
@@ -971,6 +986,7 @@ def create_random_estimations_simbench(
             Parameter for :func:`_add_measurements_af`. Attention if None, no seed will be used different to normal use
             case.
         with_ortools: OR-Tools solver for linear solver ("lp" algorithm). False take scipy solver.
+        with_wls: for :func:`_calc_different_se` if true wls solver will be used.
         rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
         ri: standard deviation to apply a multiplicative perturbation to quantities for current
         rp: standard deviation to apply a multiplicative perturbation to quantities for active power
@@ -991,7 +1007,7 @@ def create_random_estimations_simbench(
         name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
         k = _create_simbench_mc_case(net, seed_pf, load_range, sgen_range)
         _fill_measurement_values_from_powerflow(net, seed_m, rv, ri, rp, rq)
-        _calc_different_se(net, failures, neg_af, name_str, with_ortools, path)
+        _calc_different_se(net, failures, neg_af, name_str, with_ortools, with_wls, path)
 
     if not failures:
         print("List is empty, very good")
@@ -1208,7 +1224,7 @@ def collect_pickle_files(folder: str, prefix: str) -> dict[int, str]:
     return files
 
 
-def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0) -> None:
+def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0, with_wls: bool = True) -> None:
     """
     Evaluate voltage magnitude and branch active power estimation results for all state estimation methods and generate
     interactive HTML visualizations.
@@ -1246,6 +1262,7 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0) ->
 
         eval_path: Where the generated HTML evaluation files will be written.
         k: coverage factor from paper (DOI: 10.1109/TIM.2024.3387498)
+        with_wls: include wls solver if true.
 
     Raises:
         FileNotFoundError: If required PICKLE result files cannot be found.
@@ -1265,20 +1282,29 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0) ->
     # -------------------------------------------------------------------------
     # Read in bus and line data from pickle
     # -------------------------------------------------------------------------
-    solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
+    if with_wls:
+        solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
+        af_wls_path = os.path.join(data_path, "af_wls")
+        af_wls_files = collect_pickle_files(af_wls_path, "af_wls_")
+    else:
+        solver_ls = ["AF-WLAV", "AF-LAV"]
 
-    af_wls_path = os.path.join(data_path, "af_wls")
-    af_wls_files = collect_pickle_files(af_wls_path, "af_wls_")
     af_wlav_path = os.path.join(data_path, "af_wlav")
     af_wlav_files = collect_pickle_files(af_wlav_path, "af_wlav_")
     af_lav_path = os.path.join(data_path, "af_lav")
     af_lav_files = collect_pickle_files(af_lav_path, "af_lav_")
 
-    pkl_files_dc = {
-        "AF-WLS": af_wls_files,
-        "AF-WLAV": af_wlav_files,
-        "AF-LAV": af_lav_files,
-    }
+    if with_wls:
+        pkl_files_dc = {
+            "AF-WLS": af_wls_files,
+            "AF-WLAV": af_wlav_files,
+            "AF-LAV": af_lav_files,
+        }
+    else:
+        pkl_files_dc = {
+            "AF-WLAV": af_wlav_files,
+            "AF-LAV": af_lav_files,
+        }
 
     res_bus_dc = {solver: {} for solver in solver_ls}
     res_bus_est_dc = {solver: {} for solver in solver_ls}
@@ -1814,7 +1840,7 @@ def write_line_current_multi_html(
     print(f"saved to {save_html}")
 
 
-def evaluation_bus(data_path: str, eval_path: str):
+def evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> None:
     # -------------------------------------------------------------------------
     # Read in failures
     # -------------------------------------------------------------------------
@@ -1822,20 +1848,29 @@ def evaluation_bus(data_path: str, eval_path: str):
     # -------------------------------------------------------------------------
     # Read in bus and line data from pickle
     # -------------------------------------------------------------------------
-    solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
 
-    af_wls_path = os.path.join(data_path, "af_wls")
-    af_wls_files = collect_pickle_files(af_wls_path, "af_wls_")
+    if with_wls:
+        solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
+        af_wls_path = os.path.join(data_path, "af_wls")
+        af_wls_files = collect_pickle_files(af_wls_path, "af_wls_")
+    else:
+        solver_ls = ["AF-WLAV", "AF-LAV"]
     af_wlav_path = os.path.join(data_path, "af_wlav")
     af_wlav_files = collect_pickle_files(af_wlav_path, "af_wlav_")
     af_lav_path = os.path.join(data_path, "af_lav")
     af_lav_files = collect_pickle_files(af_lav_path, "af_lav_")
 
-    pkl_files_dc = {
-        "AF-WLS": af_wls_files,
-        "AF-WLAV": af_wlav_files,
-        "AF-LAV": af_lav_files,
-    }
+    if with_wls:
+        pkl_files_dc = {
+            "AF-WLS": af_wls_files,
+            "AF-WLAV": af_wlav_files,
+            "AF-LAV": af_lav_files
+        }
+    else:
+        pkl_files_dc = {
+            "AF-WLAV": af_wlav_files,
+            "AF-LAV": af_lav_files
+        }
 
     bus_voltage_records = {solver: [] for solver in solver_ls}
     bus_active_power_records = {solver: [] for solver in solver_ls}
@@ -2157,7 +2192,131 @@ def eval_neg_af(
             f"Leitungsstrom je Iteration - pos/neg - {solver}",
             neg_af_bool=True
         )
-    print(f"ende")
+
+
+def _get_allocation_factor_names(net: pandapowerNet) -> list[str]:
+    """
+    Determine allocation-factor clusters from the element type columns.
+
+    Loads and static generators with missing or empty types are ignored.
+    """
+    cluster_names: set[str] = set()
+
+    for table_name in ("load", "sgen"):
+        table = getattr(net, table_name, None)
+
+        if table is None or table.empty or "type" not in table.columns:
+            continue
+
+        valid_types = (
+            table["type"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+
+        cluster_names.update(
+            cluster for cluster in valid_types
+            if cluster and cluster.lower() != "nan"
+        )
+
+    return sorted(cluster_names)
+
+
+def _build_bus_cluster_matrix(
+    net: pandapowerNet,
+    cluster_names: list[str]
+) -> pd.DataFrame:
+    """
+    Build a bus-by-cluster matrix using nominal apparent powers.
+
+    Loads and generators are both represented by positive installed
+    magnitudes because the matrix describes cluster presence and size,
+    not the power-flow sign convention.
+    """
+    matrix = pd.DataFrame(
+        0.0,
+        index=net.bus.index,
+        columns=cluster_names,
+        dtype=float
+    )
+
+    for table_name in ("load", "sgen"):
+        table = getattr(net, table_name)
+
+        if table.empty or "type" not in table.columns:
+            continue
+
+        for _, element in table.iterrows():
+            cluster = str(element.get("type", "")).strip()
+
+            if cluster not in matrix.columns:
+                continue
+
+            bus = int(element["bus"])
+            p = float(element.get("p_mw", 0.0))
+            q = float(element.get("q_mvar", 0.0))
+
+            matrix.at[bus, cluster] += np.hypot(p, q)
+
+    return matrix
+
+
+def _build_radial_children(
+    net: pandapowerNet,
+    root_bus: int
+) -> tuple[dict[int, list[tuple[int, int]]], dict[int, int]]:
+    """
+    Orient the network as a tree starting from root_bus.
+
+    Returns
+    -------
+    children:
+        Mapping parent bus -> list of (child bus, line index).
+    parent:
+        Mapping child bus -> parent bus.
+    """
+    adjacency: dict[int, list[tuple[int, int]]] = {
+        int(bus): [] for bus in net.bus.index
+    }
+
+    for line_idx, line in net.line.iterrows():
+        if "in_service" in line and not bool(line["in_service"]):
+            continue
+
+        from_bus = int(line["from_bus"])
+        to_bus = int(line["to_bus"])
+
+        adjacency[from_bus].append((to_bus, int(line_idx)))
+        adjacency[to_bus].append((from_bus, int(line_idx)))
+
+    children: dict[int, list[tuple[int, int]]] = {
+        int(bus): [] for bus in net.bus.index
+    }
+    parent: dict[int, int] = {}
+    visited = {root_bus}
+    queue = [root_bus]
+
+    while queue:
+        current = queue.pop(0)
+
+        for neighbor, line_idx in adjacency[current]:
+            if neighbor in visited:
+                continue
+
+            visited.add(neighbor)
+            parent[neighbor] = current
+            children[current].append((neighbor, line_idx))
+            queue.append(neighbor)
+
+    if len(visited) != len(net.bus):
+        missing = sorted(set(net.bus.index.astype(int)) - visited)
+        raise ValueError(
+            "The network is disconnected or contains buses that cannot be "
+            f"reached from root bus {root_bus}: {missing}"
+        )
+
+    return children, parent
 
 
 if __name__ == "__main__":
@@ -2167,9 +2326,10 @@ if __name__ == "__main__":
     mv_b: bool = False
     ieee14_b: bool = False
     ieee30_b: bool = False
-    bus18_b: bool = True
-    eval_18bus_b: bool = True
+    bus18_b: bool = False
+    eval_18bus_b: bool = False
     simbench_b: bool = False
+    eval_sb_b: bool = True
 
     if mv_b:
         # rv=.01, rp=.03, rq=.03
@@ -2198,6 +2358,7 @@ if __name__ == "__main__":
             100,
             112,
             False,
+            True,
             .01,
             .01,
             .01,
@@ -2205,8 +2366,8 @@ if __name__ == "__main__":
 
         e_path = os.path.join(str(os.getenv("PATH_EVAL_18BUS")), subdir)
         evaluation_af(d_path, e_path)
-        evaluation_vp(d_path, e_path)
-        evaluation_bus(d_path, e_path)
+        evaluation_vp(d_path, e_path, 3.0, True)
+        evaluation_bus(d_path, e_path, True)
 
     if eval_18bus_b:
         pos_dir = "002"
@@ -2220,23 +2381,42 @@ if __name__ == "__main__":
         )
 
     if simbench_b:
-        sb_grid_ls = ["1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"]  #
-        subdir = "000"
+        sb_grid_ls = ["1-MV-rural--0-sw"]  #"1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw"  "1-MV-rural--0-sw"
+        subdir = "001"
         for sb_grid in sb_grid_ls:
             d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid, subdir)
             os.makedirs(d_path, exist_ok=True)
 
             net_sb = sb.get_simbench_net(sb_grid)
-            net_sb.load["type"] = net_sb.load["type"].fillna("residential")
+            # net_sb.load["type"] = net_sb.load["type"].fillna("residential")
+
+            p_loads = net_sb.load["p_mw"].abs()
+
+            net_sb.load["type"] = np.select(
+                [
+                    p_loads <= 0.10,
+                    (p_loads > 0.10) & (p_loads <= 0.28),
+                    (p_loads > 0.28) & (p_loads <= 0.37),
+                    p_loads > 0.37,
+                ],
+                [
+                    "load_small",
+                    "load_medium",
+                    "load_large",
+                    "load_very_large",
+                ],
+                default="unknown"
+            )
 
             create_random_estimations_simbench(
                 net_sb,
                 d_path,
-                1000,
+                100,
                 112,
                 None,
                 None,
                 True,
+                False,
                 .01,
                 .01,
                 .01,
@@ -2246,13 +2426,94 @@ if __name__ == "__main__":
             )
             e_path = os.path.join(os.getenv("PATH_EVAL_SB", "."), sb_grid, subdir)
             evaluation_af(d_path, e_path)
-            evaluation_vp(d_path, e_path)
+            evaluation_vp(d_path, e_path, 3.0, False)
+            evaluation_bus(d_path, e_path, False)
             # net_sb.measurement.drop(net_sb.measurement.index, inplace=True)
             print(f"finished: {sb_grid}")
 
+    if eval_sb_b:
+        pos_dir = "000"
+        neg_dir = "001"
+        sb_grid_name = "1-MV-rural--0-sw"
+        eval_neg_af(
+            os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, pos_dir),
+            os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, neg_dir),
+            os.path.join(str(os.getenv("PATH_EVAL_SB")), sb_grid_name, pos_dir),
+            os.path.join(str(os.getenv("PATH_EVAL_SB")), sb_grid_name, neg_dir)
+        )
+
     sim_bool = False
     if sim_bool:
-        net_sb_test = sb.get_simbench_net("1-MVLV-semiurb--0-sw")
+        subdir = "000"
+        sb_grid_name = "1-MV-semiurb--0-sw"
+        d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name, subdir)
+        os.makedirs(d_path, exist_ok=True)
+
+        net_sb = sb.get_simbench_net(sb_grid_name)
+
+        p_loads = net_sb.load["p_mw"].abs()
+
+        net_sb.load["type"] = np.select(
+            [
+                p_loads <= 0.10,
+                (p_loads > 0.10) & (p_loads <= 0.28),
+                (p_loads > 0.28) & (p_loads <= 0.37),
+                p_loads > 0.37,
+            ],
+            [
+                "load_small",
+                "load_medium",
+                "load_large",
+                "load_very_large",
+            ],
+            default="unknown"
+        )
+
+        # net_sb.load["type"] = np.select(
+        #     [
+        #         p_loads <= 0.10,
+        #         (p_loads > 0.10) & (p_loads <= 0.25),
+        #         p_loads > 0.25,
+        #     ],
+        #     [
+        #         "load_small",
+        #         "load_medium",
+        #         "load_large",
+        #     ],
+        #     default="unknown"
+        # )
+
+        create_random_estimations_simbench(
+            net_sb,
+            d_path,
+            100,
+            112,
+            None,
+            None,
+            True,
+            False,
+            .01,
+            .01,
+            .01,
+            .01,
+            (.5, .8),
+            (.3, .5)
+        )
+
+        e_path = os.path.join(os.getenv("PATH_EVAL_SB", "."), sb_grid_name, subdir)
+        evaluation_af(d_path, e_path)
+        evaluation_vp(d_path, e_path, 3.0, True)
+        evaluation_bus(d_path, e_path)
+
+        alloc_fac_ls = _get_allocation_factor_names(net_sb)
+        af_matrix = _build_bus_cluster_matrix(net_sb, alloc_fac_ls)
+
+
+        number_af = (
+                len(net_sb.load["type"].unique()) + len(net_sb.gen["type"].unique()) + len(net_sb.sgen["type"].unique())
+        )
+
+        print(f"ende")
 
     runtime = time.perf_counter() - time_start
     print(f"calculated in: {timedelta(seconds=runtime)}")
