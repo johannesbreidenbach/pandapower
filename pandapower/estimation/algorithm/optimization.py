@@ -69,7 +69,7 @@ class OptAlgorithm(BaseAlgorithm):
         estm = get_estimator(BaseEstimatorOpt, estimator)(eppci, **kwargs)
 
         jac = estm.create_cost_jacobian
-        res = minimize(
+        res = minimize(  # type: ignore[call-overload]
             estm.cost_function,
             x0=eppci.E,
             method=opt_method, jac=jac, tol=self.tolerance,

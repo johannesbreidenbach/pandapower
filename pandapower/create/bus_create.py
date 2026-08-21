@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright (c) 2016-2026 by University of Kassel and Fraunhofer Institute for Energy Economics
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
@@ -55,6 +53,8 @@ def _geodata_to_geo_series(
         if len(geo) != nr_buses:
             raise ValueError("geodata must be a single point or have the same length as nr_buses")
     else:
+        if coords is None:
+            return None  # unreachable but required for type narrowing
         logger.warning(
             "There is no support for LineString geodata on a bus. Some functionality might not work as intended."
             " Use at your own risk."
@@ -286,7 +286,7 @@ def create_buses_dc(
             geo = _geodata_to_geo_series([geodata], coords, nr_buses_dc)
         else:
             assert hasattr(geodata, "__iter__"), "geodata must be an iterable"
-            geo = _geodata_to_geo_series(geodata, coords, nr_buses)  # type: ignore
+            geo = _geodata_to_geo_series(geodata, coords, nr_buses_dc)  # type: ignore
     else:
         geo = _geodata_to_geo_series(geodata, coords, nr_buses_dc)
 

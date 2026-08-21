@@ -66,7 +66,9 @@ try:
     lightsim2grid_available = True
 except ImportError:
     lightsim2grid_available = False
+
 import logging
+
 try:
     from geopandas import GeoSeries
     from shapely import from_geojson
@@ -1988,12 +1990,15 @@ def _add_dcline_gens(net: pandapowerNet) -> None:
     from pandapower.create import create_gen
 
     for dctab in net.dcline.itertuples():
-        p_mw = np.abs(dctab.p_mw)
-        p_loss = p_mw * (1 - dctab.loss_percent / 100) - dctab.loss_mw  # type: ignore[operator]
+        p_mw: float = np.abs(dctab.p_mw)  # type: ignore[operator]
+        p_loss: float = p_mw * (1 - dctab.loss_percent / 100) - dctab.loss_mw  # type: ignore[assignment,operator]
 
         max_p_mw: float = dctab.max_p_mw  # type: ignore[assignment]
         p_min: float
         p_max: float
+
+        p_to: float
+        p_from: float
         if np.sign(dctab.p_mw) > 0:
             p_to = p_loss
             p_from = -p_mw
@@ -2005,15 +2010,29 @@ def _add_dcline_gens(net: pandapowerNet) -> None:
             p_max = 0
             p_min = -max_p_mw
 
-        create_gen(net, bus=dctab.to_bus, p_mw=p_to, vm_pu=dctab.vm_to_pu,
-                   min_p_mw=p_min, max_p_mw=p_max,
-                   max_q_mvar=dctab.max_q_to_mvar, min_q_mvar=dctab.min_q_to_mvar,
-                   in_service=dctab.in_service)
+        create_gen(
+            net,
+            bus=dctab.to_bus,  # type: ignore[arg-type]
+            p_mw=p_to,
+            vm_pu=dctab.vm_to_pu,  # type: ignore[arg-type]
+            min_p_mw=p_min,
+            max_p_mw=p_max,
+            max_q_mvar=dctab.max_q_to_mvar,  # type: ignore[arg-type]
+            min_q_mvar=dctab.min_q_to_mvar,  # type: ignore[arg-type]
+            in_service=dctab.in_service,  # type: ignore[arg-type]
+        )
 
-        create_gen(net, bus=dctab.from_bus, p_mw=p_from, vm_pu=dctab.vm_from_pu,
-                   min_p_mw=-p_max, max_p_mw=-p_min,
-                   max_q_mvar=dctab.max_q_from_mvar, min_q_mvar=dctab.min_q_from_mvar,
-                   in_service=dctab.in_service)
+        create_gen(
+            net,
+            bus=dctab.from_bus,  # type: ignore[arg-type]
+            p_mw=p_from,
+            vm_pu=dctab.vm_from_pu,  # type: ignore[arg-type]
+            min_p_mw=-p_max,
+            max_p_mw=-p_min,
+            max_q_mvar=dctab.max_q_from_mvar,  # type: ignore[arg-type]
+            min_q_mvar=dctab.min_q_from_mvar,  # type: ignore[arg-type]
+            in_service=dctab.in_service,  # type: ignore[arg-type]
+        )
 
 
 def _add_vsc_stacked(net: pandapowerNet):
@@ -2039,9 +2058,21 @@ def _add_vsc_stacked(net: pandapowerNet):
             ref_bus = bus_dc_minus
             control_mode_dc = 'vm_pu_diff_p'
 
-        create_vsc(net, ac_bus, bus_dc_plus, r_ohm/2., x_ohm/2., r_dc_ohm/2., pl_dc_mw=pl_dc_mw,
-                   control_mode_ac=control_mode_ac, control_value_ac=control_value_ac, name=str(name)+"+",
-                   control_mode_dc=control_mode_dc, control_value_dc=control_value_dc, ref_bus=ref_bus)
+        create_vsc(
+            net,
+            ac_bus,
+            bus_dc_plus,
+            r_ohm / 2.0,
+            x_ohm / 2.0,
+            r_dc_ohm / 2.0,
+            pl_dc_mw=pl_dc_mw,
+            control_mode_ac=control_mode_ac,
+            control_value_ac=control_value_ac,
+            name=str(name) + "+",
+            control_mode_dc=control_mode_dc,  # type: ignore[arg-type]
+            control_value_dc=control_value_dc,
+            ref_bus=ref_bus,
+        )
 
         ref_bus = None
         if control_mode_dc == 'vm_pu_diff_p':
@@ -2049,9 +2080,21 @@ def _add_vsc_stacked(net: pandapowerNet):
             control_mode_dc = 'vm_pu_diff_m'
             control_value_dc = -control_value_dc
 
-        create_vsc(net, ac_bus, bus_dc_minus, r_ohm/2., x_ohm/2., r_dc_ohm/2., pl_dc_mw=pl_dc_mw,
-                   control_mode_ac=control_mode_ac, control_value_ac=control_value_ac, name=str(name)+"-",
-                   control_mode_dc=control_mode_dc, control_value_dc=control_value_dc, ref_bus=ref_bus)
+        create_vsc(
+            net,
+            ac_bus,
+            bus_dc_minus,
+            r_ohm / 2.0,
+            x_ohm / 2.0,
+            r_dc_ohm / 2.0,
+            pl_dc_mw=pl_dc_mw,
+            control_mode_ac=control_mode_ac,
+            control_value_ac=control_value_ac,
+            name=str(name) + "-",
+            control_mode_dc=control_mode_dc,  # type: ignore[arg-type]
+            control_value_dc=control_value_dc,
+            ref_bus=ref_bus,
+        )
 
 
 def _add_auxiliary_elements(net: pandapowerNet):
@@ -2085,7 +2128,7 @@ def _replace_nans_with_default_limits(net: pandapowerNet, ppc: PyPowerNetwork) -
 
 def _init_runpp_options(
     net: pandapowerNet,
-    algorithm: Literal["nr", "iwamoto_nr", "bfsw", "gs", "fdxb", "fdbx"],
+    algorithm: Literal["nr", "iwamoto_nr", "bfsw", "gs", "fdxb", "fdbx", "helm"],
     calculate_voltage_angles: Literal["auto"] | bool,
     init: Literal["auto", "dc", "flat", "results"] | float,
     max_iteration: Literal["auto"] | int,
@@ -2170,7 +2213,7 @@ def _init_runpp_options(
                 calculate_voltage_angles = True
 
     default_max_iteration = {"nr": 10, "iwamoto_nr": 10, "bfsw": 100, "gs": 10000, "fdxb": 30,
-                             "fdbx": 30}
+                             "fdbx": 30, "helm": 40}
     with_facts = net.svc.in_service.any() or net.tcsc.in_service.any() or \
                  net.ssc.in_service.any() or net.vsc.in_service.any() or \
                  net.vsc_stacked.in_service.any() or net.vsc_bipolar.in_service.any()
@@ -2224,9 +2267,9 @@ def _init_runpp_options(
             logger.warning("Currently distributed_slack is implemented for 'ext_grid', 'gen' "
                            "and 'xward' only, not for '" + "', '".join(
                 false_slack_weight_elms) + "'.")
-        if algorithm != 'nr':
+        if algorithm != 'nr' and algorithm != 'helm':
             raise NotImplementedError(
-                'Distributed slack is only implemented for Newton Raphson algorithm.')
+                'Distributed slack is only implemented for Newton Raphson algorithm and HELM.')
 
     if tdpf:
         if algorithm != 'nr':

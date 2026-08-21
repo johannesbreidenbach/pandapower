@@ -215,7 +215,7 @@ class WLSAlgorithm(BaseAlgorithm):
                     norm_invG = norm(inv(G_m), np.inf)
                     cond = norm_G*norm_invG
                     if cond > 10**18:
-                        self.logger.warning("WARNING: Gain matrix is ill-conditioned: {:.2E}".format(cond))
+                        self.logger.warning(f"WARNING: Gain matrix is ill-conditioned: {cond:.2e}")
 
                 # state vector difference d_E
                 # d_E = G_m^-1 * (H' * R^-1 * r)
@@ -226,10 +226,10 @@ class WLSAlgorithm(BaseAlgorithm):
                 # operating conditions far from starting state variables
                 current_error = float(np.max(np.abs(d_E)))
                 if current_error > 0.35:
-                    d_E = d_E*0.35/current_error
+                    d_E = d_E*0.35/current_error  # type: ignore[assignment]
 
                 # Update E with d_E
-                E += d_E.ravel()  # ravel() convert multidimensional array to 1D-array
+                E += d_E.ravel()  # type: ignore[union-attr] # ravel() convert multidimensional array to 1D-array
                 eppci.update_E(E)
 
                 if debug_mode:
@@ -321,7 +321,7 @@ class WLSZeroInjectionConstraintsAlgorithm(BaseAlgorithm):
 
                 # building a new gain matrix for new constraints.
                 A_1 = vstack([G_m, C])
-                c_ax = hstack([C, np.zeros((C.shape[0], C.shape[0]))])
+                c_ax = hstack([C, np.zeros((C.shape[0], C.shape[0]))])  # type: ignore[arg-type, var-annotated]
                 c_xT = c_ax.T
                 M_tx = csr_matrix(hstack((A_1, c_xT)))  # again adding to the new gain matrix
                 rhs = H.T * (r_inv * r)  # original right hand side
@@ -396,7 +396,7 @@ class IRWLSAlgorithm(BaseAlgorithm):
 
                 # state vector difference d_E and update E
                 d_E = spsolve(G_m, H.T * (phi * r))
-                E += d_E.ravel()
+                E += d_E.ravel()  # type: ignore[attr-defined]
                 eppci.update_E(E)
 
                 # prepare next iteration

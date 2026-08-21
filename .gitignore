@@ -2,6 +2,7 @@
 *~
 build/
 .pytest_cache/
+.mypy_cache/
 dist/
 .cache/
 .idea
@@ -30,8 +31,8 @@ pandapower/timeseries/logs/*
 /.vscode/
 pandapower/test/opf/buffer_file.json
 pandapower/test/buffer_file.json
-/pandapower/test/test_files/postgresql_connect_data.json
 sonar-project.properties
 .scannerwork/
 uv.lock
 .env
+*.code-workspace
