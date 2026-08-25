@@ -14,6 +14,7 @@ from tqdm import tqdm
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
+import matplotlib.pyplot as plt
 
 from dotenv import load_dotenv
 
@@ -30,6 +31,101 @@ from pandapower.test.estimation.test_lav_estimation import _r
 
 
 # begin functions
+def _plot_bus_voltage(net: pandapowerNet, close_b: bool = False) -> None:
+    bus_voltage_pu = net.res_bus["vm_pu"]
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(net.bus.index, bus_voltage_pu, marker="o", linestyle="-")
+    ax.axhline(1.0, color="black", linestyle="--", linewidth=1)
+    ax.set_xlabel("Busindex")
+    ax.set_ylabel("Spannung [p.u.]")
+    ax.set_title("Spannungen an den Bussen")
+    ax.grid(True)
+    fig.tight_layout()
+    plt.show()
+    plt.close(fig)
+
+
+
+def _check_net_limits(net: pandapowerNet) -> list[dict[str, str]]:
+    """
+    Check whether voltage and loading limits are violated in the network.
+
+    The function checks bus and transformer voltages against the permissible voltage range from 0.90 p.u. to 1.10 p.u.
+    It also checks line and transformer loading against the maximum permissible loading of 100 %.
+
+    Arguments:
+        net: Pandapower network containing the power flow results in ``res_bus``, ``res_line`` and ``res_trafo``.
+
+    Returns:
+        A list containing one dictionary if at least one limit is violated. The dictionary contains the key
+        ``"violation"`` and a comma-separated string describing all detected violations. An empty list is returned
+        if no limit is violated.
+    """
+    violation_records: list[dict[str, str]] = []
+    # check limits of voltage and loads +-10% of p.u and 100% of loads.
+    voltage_violation = ((net.res_bus["vm_pu"] < 0.90) | (net.res_bus["vm_pu"] > 1.10)).any()
+    line_loading_violation = (net.res_line["loading_percent"] > 100.0).any()
+
+    trafo_voltage_violation = (
+            (net.res_trafo["vm_lv_pu"] < 0.90) | (net.res_trafo["vm_lv_pu"] > 1.10)
+    ).any()
+    trafo_loading_violation = (net.res_trafo["loading_percent"] > 100.0).any()
+
+    reasons: list[str] = []  # reasons for not respected limits/boundaries/tolerances
+
+    if voltage_violation:
+        reasons.append("voltage tolerance")
+    if line_loading_violation:
+        reasons.append("line utilization")
+
+    if trafo_voltage_violation:
+        reasons.append("voltage tolerance transformer")
+    if trafo_loading_violation:
+        reasons.append("line utilization transformer")
+
+    has_violation = bool(reasons)
+    if has_violation:
+        violation_records.append(
+            {"violation": ", ".join(reasons)}
+        )
+    return violation_records
+
+
+def _check_plot_net(net: pandapowerNet) -> list[dict[str, str]]:
+    runpp(net)
+    violation_records = _check_net_limits(net)
+    _plot_bus_voltage(net)
+    return violation_records
+
+
+def apply_case(
+        net: pandapowerNet,
+        case_values: dict[tuple[str, str], pd.DataFrame],
+        case: str = "lPV"
+) -> None:
+    r"""
+        Apply a SimBench study case to a pandapower network.
+
+        The values of the selected study case are assigned to the corresponding pandapower elements and parameters.
+        Empty element tables are skipped.
+
+        Parameters:
+            net: pandapower network that is modified in-place.
+            case_values: Absolute SimBench study case values as returned by :func:`simbench.get_absolute_values`.
+            case: Name of the study case to apply, e.g. ``bc``, ``"hL"``, ``n1``, ``hW``, ``hPV``, ``lW``, ``"lPV"``.
+
+        Returns:
+            None.
+        """
+    for (element, parameter), values in case_values.items():
+
+        # take only existing elements
+        if values.shape[1] == 0:
+            continue
+        # set value
+        net[element].loc[values.columns, parameter] = values.loc[case]
+
+
 def _add_measurements_af(
         net_base: pandapowerNet,
         seed_m: int | None = None,
@@ -790,7 +886,8 @@ def _calc_different_se(
             try:
                 net_af_wls = copy.deepcopy(net_base)
                 af_wls = estimate(net_af_wls, algorithm="af-wls", wlav=False)  # , af_target_value=.4, af_std_value=.15
-                af_wls["allocation_factors"].index = ["AF-WLS"]  # set index for saving data
+                # ToDo: add TypeDict for state estimation
+                af_wls["allocation_factors"].index = ["AF-WLS"]  # type: ignore[attr-defined] # set index for saving data
                 if not af_wls["success"]:
                     failures.append(f"AF-WLS, {num_it}, se failed")  # add failures information to a list
                 to_pickle(net_af_wls, af_wls_file)  # save grid to pickle
@@ -2323,13 +2420,35 @@ if __name__ == "__main__":
     time_start = time.perf_counter()
     load_dotenv()
 
+    test_b: bool = False
+    test_case_b: bool = False
     mv_b: bool = False
     ieee14_b: bool = False
     ieee30_b: bool = False
     bus18_b: bool = False
     eval_18bus_b: bool = False
     simbench_b: bool = False
-    eval_sb_b: bool = True
+    eval_sb_b: bool = False
+
+    case_sb = "lPV"
+
+    if test_b:
+        sb_grid_ls = [
+            "1-MV-rural--0-sw", "1-MV-semiurb--0-sw", "1-MV-urban--0-sw", "1-MV-comm--0-sw", "1-MV-rural--0-sw"
+        ]
+        for sb_grid in sb_grid_ls:
+            net_sb = sb.get_simbench_net(sb_grid)
+            if test_case_b:
+                case_val = sb.get_absolute_values(
+                    net_sb, profiles_instead_of_study_cases=False
+                )  # if true -> time series
+                apply_case(net_sb, case_val, case_sb)  # for cases exist ext_grid vm_pu. This will set automatically and
+                # overwrite in the following for loop.
+                if ("storage", "p_mw") not in case_val and not net_sb.storage.empty:
+                    net_sb.storage["p_mw"] = 0.0
+            violation_dc = _check_plot_net(net_sb)
+            print(f"finished simbench grid {sb_grid} with violation: {violation_dc}")
+        print(f"end")
 
     if mv_b:
         # rv=.01, rp=.03, rq=.03
@@ -2442,13 +2561,12 @@ if __name__ == "__main__":
             os.path.join(str(os.getenv("PATH_EVAL_SB")), sb_grid_name, neg_dir)
         )
 
-    sim_bool = False
+    sim_bool = True
     if sim_bool:
         subdir = "000"
-        sb_grid_name = "1-MV-semiurb--0-sw"
+        sb_grid_name = "1-MV-comm--0-sw"  # voltage looks good for state estimation
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name, subdir)
         os.makedirs(d_path, exist_ok=True)
-
         net_sb = sb.get_simbench_net(sb_grid_name)
 
         p_loads = net_sb.load["p_mw"].abs()
