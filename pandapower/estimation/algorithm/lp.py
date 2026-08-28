@@ -19,7 +19,10 @@ from pandapower.estimation.algorithm.matrix_base import BaseAlgebra
 import logging
 std_logger = logging.getLogger(__name__)
 std_logger.setLevel(logging.DEBUG)
-
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 LinprogMethod = Literal["highs", "highs-ds", "highs-ipm"]
 _ALLOWED_LINPROG_METHODS = {"highs", "highs-ds", "highs-ipm"}
@@ -296,6 +299,36 @@ class LPAlgorithm(BaseAlgorithm):
         return arr
 
     @staticmethod
+    def _report_range(name: str, values: ArrayLike) -> None:
+        """
+        Log basic numerical information about an array.
+        """
+        # Convert sparse and dense inputs to a one-dimensional NumPy array
+        if hasattr(values, "data") and issparse(values):
+            values = values.data
+
+        values = np.asarray(values, dtype=np.float64).reshape(-1)
+
+        if values.size == 0:
+            std_logger.debug("%s: empty array", name)
+            return
+
+        finite_values = values[np.isfinite(values)]
+
+        if finite_values.size == 0:
+            std_logger.debug("%s: shape=%s, contains no finite values", name, values.shape)
+            return
+
+        std_logger.debug(
+            "%s: shape=%s, min=%g, max=%g, max_abs=%g",
+            name,
+            values.shape,
+            np.min(finite_values),
+            np.max(finite_values),
+            np.max(np.abs(finite_values)),
+        )
+
+    @staticmethod
     def _solve_lav_scipy(
             H: csr_matrix,
             r: NDArray[np.float64],
@@ -378,6 +411,46 @@ class LPAlgorithm(BaseAlgorithm):
         # m number of measurements len(eppci.z) -> z element R^{m}, n number of state variable len(eppci.E)
         m, n = H.shape
 
+        # Validate the shape of the residual vector
+        if r.shape != (m,):
+            raise ValueError(f"Invalid shape of r: {r.shape}, expected {(m,)}")
+
+        # Validate the shape of the weight vector
+        if weights.shape != (m,):
+            raise ValueError(f"Invalid shape of weights: {weights.shape}, expected {(m,)}")
+
+        # The bounds must cover all state-update and auxiliary variables
+        if len(bounds) != n + m:
+            raise ValueError(f"Invalid number of bounds: {len(bounds)}, expected {n + m}")
+
+        # Check the residual vector for NaN or infinite values
+        if not np.isfinite(r).all():
+            raise ValueError("r contains NaN or Inf.")
+
+        # Check the non-zero entries of the sparse Jacobian matrix
+        if not np.isfinite(H.data).all():
+            raise ValueError("H contains NaN or Inf.")
+
+        # Check the weights for NaN or infinite values
+        if not np.isfinite(weights).all():
+            raise ValueError("weights contains NaN or Inf.")
+
+        # Validate every lower and upper bound
+        for index, (lower, upper) in enumerate(bounds):
+            # Lower bounds must be finite if they are specified
+            if lower is not None and not np.isfinite(lower):
+                raise ValueError(f"Invalid lower bound at index {index}: {lower}")
+
+            # Upper bounds must be finite if they are specified
+            if upper is not None and not np.isfinite(upper):
+                raise ValueError(f"Invalid upper bound at index {index}: {upper}")
+
+            # The lower bound must not exceed the upper bound
+            if lower is not None and upper is not None and lower > upper:
+                raise ValueError(f"Infeasible bound at index {index}: ({lower}, {upper})")
+
+
+
         # We solve (Abur - Power system state estimation: theory and implementation, 2004):
         # min sum(abs(r_i)) -> abs non-linear -> -u_i <= r <= u_i and r_i = z_i - h_i(x)
         # r_i -> risidual of iteration i (differenc between measurement values and model function)
@@ -413,6 +486,22 @@ class LPAlgorithm(BaseAlgorithm):
         A_ub = vstack([A1, A2], format="csr")
         b_ub = np.r_[b1, b2]
 
+        # Report numerical ranges before calling HiGHS
+        LPAlgorithm._report_range("H.data", H.data)
+        LPAlgorithm._report_range("r", r)
+        LPAlgorithm._report_range("weights", weights)
+        LPAlgorithm._report_range("c", c)
+        LPAlgorithm._report_range("b_ub", b_ub)
+
+        std_logger.debug(
+            "LP dimensions: H=%s, A_ub=%s, b_ub=%s, c=%s, bounds=%d",
+            H.shape,
+            A_ub.shape,
+            b_ub.shape,
+            c.shape,
+            len(bounds),
+        )
+
         result = linprog(
             c,
             A_ub=A_ub,
@@ -422,7 +511,12 @@ class LPAlgorithm(BaseAlgorithm):
         )
 
         if not result.success:
-            raise np.linalg.LinAlgError(result.message)
+            raise np.linalg.LinAlgError(
+                f"SciPy LAV optimization failed:"
+                f"status={result.status},"
+                f"message={result.message},"
+                f"success={result.success}"
+            )
         if result.x is None:
             raise np.linalg.LinAlgError("SciPy LAV optimization returned no solution vector.")
         if result.fun is None:

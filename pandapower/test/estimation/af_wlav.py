@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 # imports from pandapower
 import pandapower.networks as pn
 from pandapower import to_pickle, from_pickle
+from pandapower.converter.powerfactory.pp_import_functions import add_tap_dependant_impedance_for_trafo3W
 from pandapower.run import runpp
 from pandapower.estimation import estimate
 from pandapower.create import (create_measurement, create_empty_network, create_bus, create_ext_grid,
@@ -31,6 +32,19 @@ from pandapower.test.estimation.test_lav_estimation import _r
 
 
 # begin functions
+def get_non_empty_table_names(net: pandapowerNet) -> list[str]:
+    """
+    Return the names of all non-empty DataFrame tables in a pandapower network.
+    """
+    table_names: list[str] = []
+
+    for name, value in net.items():
+        if isinstance(value, pd.DataFrame) and not value.empty:
+            table_names.append(name)
+
+    return table_names
+
+
 def _plot_bus_voltage(net: pandapowerNet, close_b: bool = False) -> None:
     bus_voltage_pu = net.res_bus["vm_pu"]
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -885,7 +899,7 @@ def _calc_different_se(
         else:
             try:
                 net_af_wls = copy.deepcopy(net_base)
-                af_wls = estimate(net_af_wls, algorithm="af-wls", wlav=False)  # , af_target_value=.4, af_std_value=.15
+                af_wls = estimate(net_af_wls, algorithm="af-wls")  # , af_target_value=.4, af_std_value=.15
                 # ToDo: add TypeDict for state estimation
                 af_wls["allocation_factors"].index = ["AF-WLS"]  # type: ignore[attr-defined] # set index for saving data
                 if not af_wls["success"]:
@@ -904,7 +918,14 @@ def _calc_different_se(
     else:
         try:
             net_af_lav = copy.deepcopy(net_base)
-            af_lav = estimate(net_af_lav, algorithm="af-lp", wlav=False, with_ortools=with_ortools)
+            af_lav = estimate(
+                net_af_lav,
+                algorithm="af-lp",
+                wlav=False,
+                with_ortools=with_ortools,
+                linprog_method="highs-ipm",
+                maximum_iterations=100
+            )
             af_lav["allocation_factors"].index = ["AF-LAV"]  # set index for saving data
             if not af_lav["success"]:
                 failures.append(f"AF-LAV, {num_it}, se failed")
@@ -926,8 +947,17 @@ def _calc_different_se(
         print(f"file {af_wlav_file} already exists")
     else:
         try:
+            # if int(num_it) == 48:
+            #     print(f"halt stop, jetzt programmiere ich!!")
             net_af_wlav = copy.deepcopy(net_base)
-            af_wlav = estimate(net_af_wlav, algorithm="af-lp", wlav=True, with_ortools=with_ortools)
+            af_wlav = estimate(
+                net_af_wlav,
+                algorithm="af-lp",
+                wlav=True,
+                with_ortools=with_ortools,
+                linprog_method="highs-ipm",
+                maximum_iterations=100
+            )
             af_wlav["allocation_factors"].index = ["AF-WLAV"]  # set index for saving data
             if not af_wlav["success"]:
                 failures.append(f"AF-WLAV, {num_it}, se failed")
@@ -2422,6 +2452,7 @@ if __name__ == "__main__":
 
     test_b: bool = False
     test_case_b: bool = False
+    case_sb = "lPV"
     mv_b: bool = False
     ieee14_b: bool = False
     ieee30_b: bool = False
@@ -2429,8 +2460,6 @@ if __name__ == "__main__":
     eval_18bus_b: bool = False
     simbench_b: bool = False
     eval_sb_b: bool = False
-
-    case_sb = "lPV"
 
     if test_b:
         sb_grid_ls = [
@@ -2561,45 +2590,63 @@ if __name__ == "__main__":
             os.path.join(str(os.getenv("PATH_EVAL_SB")), sb_grid_name, neg_dir)
         )
 
-    sim_bool = True
+    linprog_b: bool = True
+    if linprog_b:
+        net_prob = from_pickle(
+            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/014/af_wlav/af_wlav_065.p"  # '/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/011/af_wlav/prob_af_wlav_048.p'
+        )
+
+        af_w_lav = copy.deepcopy(net_prob)
+        af_lav = copy.deepcopy(net_prob)
+        af_wls = copy.deepcopy(net_prob)
+
+        res_lav = estimate(af_lav, algorithm="af-lp", wlav=False, with_ortools=False)
+        res_wls = estimate(af_wls, algorithm="af-wls")
+        res_w_lav = estimate(
+            af_w_lav,
+            algorithm="af-lp",
+            wlav=True,
+            with_ortools=False,
+            linprog_method="highs-ipm",
+            maximum_iterations=200
+        )
+
+    sim_bool: bool = False
+    with_wls_b: bool = False
     if sim_bool:
-        subdir = "000"
-        sb_grid_name = "1-MV-comm--0-sw"  # voltage looks good for state estimation
+        subdir = "014"
+        sb_grid_name = "1-MV-comm--0-sw"  # "1-MV-urban--0-sw" -> voltage looks good for state estimation
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name, subdir)
         os.makedirs(d_path, exist_ok=True)
         net_sb = sb.get_simbench_net(sb_grid_name)
 
-        p_loads = net_sb.load["p_mw"].abs()
+        net_elements_ls = get_non_empty_table_names(net_sb)
 
-        net_sb.load["type"] = np.select(
-            [
-                p_loads <= 0.10,
-                (p_loads > 0.10) & (p_loads <= 0.28),
-                (p_loads > 0.28) & (p_loads <= 0.37),
-                p_loads > 0.37,
-            ],
-            [
-                "load_small",
-                "load_medium",
-                "load_large",
-                "load_very_large",
-            ],
-            default="unknown"
-        )
+        p_loads = net_sb.load["p_mw"].abs()
 
         # net_sb.load["type"] = np.select(
         #     [
-        #         p_loads <= 0.10,
-        #         (p_loads > 0.10) & (p_loads <= 0.25),
-        #         p_loads > 0.25,
+        #         p_loads <= 0.30,
+        #         p_loads > 0.30
         #     ],
         #     [
-        #         "load_small",
-        #         "load_medium",
-        #         "load_large",
+        #         "residential",
+        #         "commercial"
         #     ],
         #     default="unknown"
         # )
+
+        net_sb.load["type"] = np.select(  # "1-MV-comm--0-sw"
+            [
+                p_loads <= 0.70,
+                p_loads > 0.70
+            ],
+            [
+                "residential",
+                "commercial"
+            ],
+            default="unknown"
+        )
 
         create_random_estimations_simbench(
             net_sb,
@@ -2608,8 +2655,8 @@ if __name__ == "__main__":
             112,
             None,
             None,
-            True,
             False,
+            with_wls_b,
             .01,
             .01,
             .01,
@@ -2620,16 +2667,16 @@ if __name__ == "__main__":
 
         e_path = os.path.join(os.getenv("PATH_EVAL_SB", "."), sb_grid_name, subdir)
         evaluation_af(d_path, e_path)
-        evaluation_vp(d_path, e_path, 3.0, True)
-        evaluation_bus(d_path, e_path)
+        evaluation_vp(d_path, e_path, 3.0, with_wls_b)
+        evaluation_bus(d_path, e_path, with_wls_b)
 
-        alloc_fac_ls = _get_allocation_factor_names(net_sb)
-        af_matrix = _build_bus_cluster_matrix(net_sb, alloc_fac_ls)
-
-
-        number_af = (
-                len(net_sb.load["type"].unique()) + len(net_sb.gen["type"].unique()) + len(net_sb.sgen["type"].unique())
-        )
+        # alloc_fac_ls = _get_allocation_factor_names(net_sb)
+        # af_matrix = _build_bus_cluster_matrix(net_sb, alloc_fac_ls)
+        #
+        #
+        # number_af = (
+        #         len(net_sb.load["type"].unique()) + len(net_sb.gen["type"].unique()) + len(net_sb.sgen["type"].unique())
+        # )
 
         print(f"ende")
 
