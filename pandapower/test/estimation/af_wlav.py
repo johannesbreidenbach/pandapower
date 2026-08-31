@@ -947,7 +947,7 @@ def _calc_different_se(
         print(f"file {af_wlav_file} already exists")
     else:
         try:
-            # if int(num_it) == 48:
+            # if int(num_it) == 48:  # Todo: remove after testing
             #     print(f"halt stop, jetzt programmiere ich!!")
             net_af_wlav = copy.deepcopy(net_base)
             af_wlav = estimate(
@@ -1252,25 +1252,45 @@ def evaluation_af(data_path: str = ".", eval_path: str = "." ) -> None:
     rows_hist = len(solver_ls)
     total_rows = rows_box + rows_hist
 
+    # -------------------------------------------------------------------------
+    # Subplot-Titel inklusive Mittelwert und Standardabweichung
+    # -------------------------------------------------------------------------
     subplot_titles = []
-    for solver in solver_ls:
-        for af in af_ls:
-            subplot_titles.append(f"Boxplot<br>{solver}<br>{af}")
 
+    # Titel für Boxplots
     for solver in solver_ls:
+        df_solver = af_total_dc[solver]
         for af in af_ls:
-            subplot_titles.append(f"Histogram<br>{solver}<br>{af}")
+            values = pd.to_numeric(df_solver[af], errors="coerce").dropna()
+            mean = values.mean()
+            std = values.std()  # Stichproben-Standardabweichung
 
-    fig = make_subplots(rows=total_rows, cols=len(af_ls), subplot_titles=subplot_titles, vertical_spacing=0.05)
+            subplot_titles.append(f"Boxplot<br>{solver}<br>{af}<br>μ = {mean:.4f}, σ = {std:.4f}")
+
+    # Titel für Histogramme
+    for solver in solver_ls:
+        df_solver = af_total_dc[solver]
+
+        for af in af_ls:
+            values = pd.to_numeric(df_solver[af], errors="coerce").dropna()
+            mean = values.mean()
+            std = values.std()
+
+            subplot_titles.append(f"Histogram<br>{solver}<br>{af}<br>μ = {mean:.4f}, σ = {std:.4f}")
+
+    fig = make_subplots(rows=total_rows, cols=len(af_ls), subplot_titles=subplot_titles, vertical_spacing=0.07)
     # -------------------------------------------------------------------------
     # Boxplots
     # -------------------------------------------------------------------------
-    for row, solver in enumerate(solver_ls, start=1):  # plotly starts with 1
+    for row, solver in enumerate(solver_ls, start=1):
         df_solver = af_total_dc[solver]
+
         for col, af in enumerate(af_ls, start=1):
+            values = pd.to_numeric(df_solver[af], errors="coerce").dropna()
+
             fig.add_trace(
                 go.Box(
-                    y=df_solver[af].dropna(),
+                    y=values,
                     name=f"{solver}-{af}",
                     boxmean=True,
                     showlegend=False
@@ -1286,9 +1306,11 @@ def evaluation_af(data_path: str = ".", eval_path: str = "." ) -> None:
         df_solver = af_total_dc[solver]
         row = rows_box + row_offset
         for col, af in enumerate(af_ls, start=1):
+            values = pd.to_numeric(df_solver[af], errors="coerce").dropna()
+
             fig.add_trace(
                 go.Histogram(
-                    x=df_solver[af].dropna(),
+                    x=values,
                     nbinsx=30,  # number of bars -> value range
                     name=f"{solver}-{af}",
                     showlegend=False
@@ -1301,8 +1323,8 @@ def evaluation_af(data_path: str = ".", eval_path: str = "." ) -> None:
     # Layout
     # -------------------------------------------------------------------------
     fig.update_layout(
-        title="Allocation Factors - Boxplots and Histograms",
-        height=2500,
+        title="Allocation Factors – Boxplots and Histograms",
+        height=max(2500, total_rows * 450),
         width=1600,
         margin=dict(t=200)
     )
@@ -1679,7 +1701,7 @@ def write_bus_voltage_multi_html(
                 fig.add_trace(go.Scatter(
                     x=neg_group["bus"],
                     y=neg_group["estimated"],
-                    name="neg Estimated",
+                    name="SE without constraints on af",
                     mode="lines+markers",
                     line=dict(color=colors["neg_estimated"]),
                     marker=dict(color=colors["neg_estimated"]),
@@ -1689,7 +1711,7 @@ def write_bus_voltage_multi_html(
                 fig.add_trace(go.Scatter(
                     x=pos_group["bus"],
                     y=pos_group["estimated"],
-                    name="pos Estimated",
+                    name="SE with constraints on af",
                     mode="lines+markers",
                     line=dict(color=colors["pos_estimated"]),
                     marker=dict(color=colors["pos_estimated"]),
@@ -1742,7 +1764,8 @@ def write_bus_power_multi_html(
         html_name: str,
         title: str,
         hide_s_bus: bool = False,
-        neg_af_bool: bool = False
+        neg_af_bool: bool = False,
+        slack_buses: list[int] | None = None,
 ) -> None:
     save_path = os.path.join(eval_path, "bus")
     os.makedirs(save_path, exist_ok=True)
@@ -1769,8 +1792,9 @@ def write_bus_power_multi_html(
     for k, iteration in enumerate(iterations):
         group = df[df["iteration"] == iteration]
 
-        if hide_s_bus:
-            group = group[group["bus"] != "0"]
+        if hide_s_bus and slack_buses is not None:
+            slack_buses_str = {str(bus) for bus in slack_buses}
+            group = group[~group["bus"].isin(slack_buses_str)]
 
         fig = go.Figure()
 
@@ -1800,7 +1824,7 @@ def write_bus_power_multi_html(
                 fig.add_trace(go.Bar(
                     x=neg_group["bus"],
                     y=neg_group["estimated"],
-                    name="neg Estimated",
+                    name="SE without constraints on af",
                     offsetgroup="neg_estimated",
                     marker_color=colors["neg_estimated"],
                 ))
@@ -1809,7 +1833,7 @@ def write_bus_power_multi_html(
                 fig.add_trace(go.Bar(
                     x=pos_group["bus"],
                     y=pos_group["estimated"],
-                    name="pos Estimated",
+                    name="SE with constraints on af",
                     offsetgroup="pos_estimated",
                     marker_color=colors["pos_estimated"],
                 ))
@@ -1913,7 +1937,7 @@ def write_line_current_multi_html(
                 fig.add_trace(go.Bar(
                     x=neg_group["line"],
                     y=neg_group["estimated"],
-                    name="neg Estimated",
+                    name="SE without constraints on af",
                     offsetgroup="neg_estimated",
                     marker_color=colors["neg_estimated"],
                 ))
@@ -1922,7 +1946,7 @@ def write_line_current_multi_html(
                 fig.add_trace(go.Bar(
                     x=pos_group["line"],
                     y=pos_group["estimated"],
-                    name="pos Estimated",
+                    name="SE with constraints on af",
                     offsetgroup="pos_estimated",
                     marker_color=colors["pos_estimated"],
                 ))
@@ -2047,6 +2071,14 @@ def evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> Non
                     "estimated": float(net_ij.res_line_est.loc[line_idx, "i_ka"] / i_base[line_idx])
                 })
 
+    slack_buses: list[int] = net_ij.ext_grid["bus"].astype(int).tolist()
+
+    if "slack" in net_ij.gen.columns:
+        slack_buses.extend(
+            net_ij.gen.loc[net_ij.gen["slack"].fillna(False).astype(bool), "bus"].astype(int).tolist()
+        )
+    slack_buses = sorted(set(slack_buses))
+
     for solver in solver_ls:
         write_bus_voltage_multi_html(
             bus_voltage_records[solver],
@@ -2059,7 +2091,9 @@ def evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> Non
             eval_path,
             f"bus_power_without_slack{solver}.html",
             f"Busleistung je Iteration - {solver}",
-            True
+            True,
+            False,
+            slack_buses
         )
         write_line_current_multi_html(
             line_current_records[solver],
@@ -2271,6 +2305,13 @@ def eval_neg_af(
                     ),
                 })
 
+    slack_buses: list[int] = net_ij.ext_grid["bus"].astype(int).tolist()
+    if "slack" in net_ij.gen.columns:
+        slack_buses.extend(
+            net_ij.gen.loc[net_ij.gen["slack"].fillna(False).astype(bool), "bus"].astype(int).tolist()
+        )
+    slack_buses = sorted(set(slack_buses))
+
     combined_bus_voltage_records = {solver: [] for solver in solver_ls}
     combined_bus_active_power_records = {solver: [] for solver in solver_ls}
     combined_line_current_records = {solver: [] for solver in solver_ls}
@@ -2309,7 +2350,8 @@ def eval_neg_af(
             f"bus_power_without_slack_pos_neg_{solver}.html",
             f"Busleistung je Iteration - pos/neg - {solver}",
             hide_s_bus=True,
-            neg_af_bool=True
+            neg_af_bool=True,
+            slack_buses=slack_buses
         )
 
         write_line_current_multi_html(
@@ -2580,9 +2622,9 @@ if __name__ == "__main__":
             print(f"finished: {sb_grid}")
 
     if eval_sb_b:
-        pos_dir = "000"
-        neg_dir = "001"
-        sb_grid_name = "1-MV-rural--0-sw"
+        pos_dir = "015"
+        neg_dir = "016"
+        sb_grid_name = "1-MV-comm--0-sw"
         eval_neg_af(
             os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, pos_dir),
             os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, neg_dir),
@@ -2590,7 +2632,7 @@ if __name__ == "__main__":
             os.path.join(str(os.getenv("PATH_EVAL_SB")), sb_grid_name, neg_dir)
         )
 
-    linprog_b: bool = True
+    linprog_b: bool = False
     if linprog_b:
         net_prob = from_pickle(
             "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/014/af_wlav/af_wlav_065.p"  # '/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/011/af_wlav/prob_af_wlav_048.p'
@@ -2614,8 +2656,8 @@ if __name__ == "__main__":
     sim_bool: bool = False
     with_wls_b: bool = False
     if sim_bool:
-        subdir = "014"
-        sb_grid_name = "1-MV-comm--0-sw"  # "1-MV-urban--0-sw" -> voltage looks good for state estimation
+        subdir = "016"
+        sb_grid_name = "1-MV-comm--0-sw"  # "1-MV-rural--0-sw" "1-MV-urban--0-sw" ## "1-MV-comm--0-sw" -> voltage looks good for state estimation
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name, subdir)
         os.makedirs(d_path, exist_ok=True)
         net_sb = sb.get_simbench_net(sb_grid_name)
@@ -2624,10 +2666,22 @@ if __name__ == "__main__":
 
         p_loads = net_sb.load["p_mw"].abs()
 
-        # net_sb.load["type"] = np.select(
+        # net_sb.load["type"] = np.select(  # "1-MV-rural--0-sw"
         #     [
-        #         p_loads <= 0.30,
-        #         p_loads > 0.30
+        #         p_loads <= 0.3,
+        #         p_loads > 0.3
+        #     ],
+        #     [
+        #         "residential",
+        #         "commercial"
+        #     ],
+        #     default="unknown"
+        # )
+
+        # net_sb.load["type"] = np.select(  # "1-MV-urban--0-sw"
+        #     [
+        #         p_loads <= 0.35,
+        #         p_loads > 0.35
         #     ],
         #     [
         #         "residential",
