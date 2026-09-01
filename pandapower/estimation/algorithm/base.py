@@ -250,7 +250,7 @@ class WLSAlgorithm(BaseAlgorithm):
                 return False
 
         # check if the estimation is successful
-        self.check_result(current_error, cur_it)
+        self.check_result(current_error, cur_it)  # set self.successfull
         self.iterations = cur_it
         if debug_mode:
             self.obj_func = obj_func
@@ -263,15 +263,15 @@ class WLSAlgorithm(BaseAlgorithm):
             # create h(x) for the current iteration
             self.hx = sem.create_hx(eppci.E)  # ToDo: check if eppci.E or E is correct Attention side effects possible
 
-            # split voltage and allocation factor variables
-            # clusters are set in ppc_conversion.py/_add_rated_power_information_af_wls() only if algorithm == "af-wls"
-            if "clusters" in self.eppci:
-                num_clusters = len(self.eppci["clusters"])
-                E1 = E[:-num_clusters]
-                E2 = E[-num_clusters:]
-                self.af = pd.DataFrame([E2], columns=eppci["clusters"])
-                eppci.update_E(E1)
-                eppci.clusters = E2
+        # split voltage and allocation factor variables
+        # clusters are set in ppc_conversion.py/_add_rated_power_information_af_wls() only if algorithm == "af-wls"
+        if "clusters" in self.eppci:
+            num_clusters = len(self.eppci["clusters"])
+            E1 = E[:-num_clusters]
+            E2 = E[-num_clusters:]
+            self.af = pd.DataFrame([E2], columns=eppci["clusters"])
+            eppci.update_E(E1)
+            eppci.clusters = E2
         return eppci
 
 

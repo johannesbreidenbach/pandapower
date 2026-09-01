@@ -899,7 +899,7 @@ def _calc_different_se(
         else:
             try:
                 net_af_wls = copy.deepcopy(net_base)
-                af_wls = estimate(net_af_wls, algorithm="af-wls")  # , af_target_value=.4, af_std_value=.15
+                af_wls = estimate(net_af_wls, algorithm="af-wls", maximum_iterations=100)  # , af_target_value=.4, af_std_value=.15
                 # ToDo: add TypeDict for state estimation
                 af_wls["allocation_factors"].index = ["AF-WLS"]  # type: ignore[attr-defined] # set index for saving data
                 if not af_wls["success"]:
@@ -2622,8 +2622,8 @@ if __name__ == "__main__":
             print(f"finished: {sb_grid}")
 
     if eval_sb_b:
-        pos_dir = "015"
-        neg_dir = "016"
+        pos_dir = "000"
+        neg_dir = "001"
         sb_grid_name = "1-MV-comm--0-sw"
         eval_neg_af(
             os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, pos_dir),
@@ -2656,7 +2656,7 @@ if __name__ == "__main__":
     sim_bool: bool = False
     with_wls_b: bool = False
     if sim_bool:
-        subdir = "016"
+        subdir = "000"
         sb_grid_name = "1-MV-comm--0-sw"  # "1-MV-rural--0-sw" "1-MV-urban--0-sw" ## "1-MV-comm--0-sw" -> voltage looks good for state estimation
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name, subdir)
         os.makedirs(d_path, exist_ok=True)
@@ -2666,17 +2666,17 @@ if __name__ == "__main__":
 
         p_loads = net_sb.load["p_mw"].abs()
 
-        # net_sb.load["type"] = np.select(  # "1-MV-rural--0-sw"
-        #     [
-        #         p_loads <= 0.3,
-        #         p_loads > 0.3
-        #     ],
-        #     [
-        #         "residential",
-        #         "commercial"
-        #     ],
-        #     default="unknown"
-        # )
+        net_sb.load["type"] = np.select(  # "1-MV-rural--0-sw"  -> wls algorithm does not work
+            [
+                p_loads <= 0.3,
+                p_loads > 0.3
+            ],
+            [
+                "residential",
+                "commercial"
+            ],
+            default="unknown"
+        )
 
         # net_sb.load["type"] = np.select(  # "1-MV-urban--0-sw"
         #     [
@@ -2690,17 +2690,17 @@ if __name__ == "__main__":
         #     default="unknown"
         # )
 
-        net_sb.load["type"] = np.select(  # "1-MV-comm--0-sw"
-            [
-                p_loads <= 0.70,
-                p_loads > 0.70
-            ],
-            [
-                "residential",
-                "commercial"
-            ],
-            default="unknown"
-        )
+        # net_sb.load["type"] = np.select(  # "1-MV-comm--0-sw"
+        #     [
+        #         p_loads <= 0.70,
+        #         p_loads > 0.70
+        #     ],
+        #     [
+        #         "residential",
+        #         "commercial"
+        #     ],
+        #     default="unknown"
+        # )
 
         create_random_estimations_simbench(
             net_sb,
@@ -2733,6 +2733,30 @@ if __name__ == "__main__":
         # )
 
         print(f"ende")
+
+    wls_check_b: bool = False
+    if wls_check_b:
+        net_sb = sb.get_simbench_net("1-MV-rural--0-sw")
+        runpp(net_sb)
+
+        p_loads = net_sb.load["p_mw"].abs()
+        net_sb.load["type"] = np.select(  # "1-MV-rural--0-sw"  -> wls algorithm does not work
+            [
+                p_loads <= 0.3,
+                p_loads > 0.3
+            ],
+            [
+                "residential",
+                "commercial"
+            ],
+            default="unknown"
+        )
+        np.random.seed(112)
+        k = _create_simbench_mc_case(net_sb, None)
+        _fill_measurement_values_from_powerflow(net_sb, None, .01, .01, .01, .01)
+        res_wls = estimate(net_sb, algorithm="af-wls", maximum_iterations=200)
+        print(f"wls check ende")
+
 
     runtime = time.perf_counter() - time_start
     print(f"calculated in: {timedelta(seconds=runtime)}")
