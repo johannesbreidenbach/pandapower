@@ -34,6 +34,7 @@ OPT_VAR_DEFAULTS = {
     "linprog_method": "highs",
     "wlav": False,
     "with_ortools": True,
+    "with_af_constraints": True,
     "af_init_value": .5,
     "af_target_value": None,
     "af_std_value": None
@@ -113,6 +114,7 @@ def estimate(
         wlav (bool, False): Perform LAV with weights.
         with_ortools (bool, True):
             Alternative solver to scipy for (W)LAV using `OR-Tools solver <https://github.com/google/or-tools>`_
+        with_af_constraints: Constraints for allocation factors between 0 and 1 for (W)LAV algorithm.
         af_init_value (float | np.ndarray, .5):
             Initial values for the af in E vector. One Value for all or an array for explicite. The
             value 0.5 is default.
@@ -392,6 +394,7 @@ class StateEstimation:
             linprog_method=opt_vars.get("linprog_method", OPT_VAR_DEFAULTS["linprog_method"]),
             wlav=opt_vars.get("wlav", OPT_VAR_DEFAULTS["wlav"]),
             with_ortools=opt_vars.get("with_ortools", OPT_VAR_DEFAULTS["with_ortools"]),
+            with_af_constraints= opt_vars.get("with_af_constraints", OPT_VAR_DEFAULTS["with_af_constraints"]),
             af_init_value=opt_vars.get("af_init_value", OPT_VAR_DEFAULTS["af_init_value"]),
             af_target_value=af_target_value,
             af_std_value=af_std_value

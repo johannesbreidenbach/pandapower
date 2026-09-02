@@ -855,6 +855,7 @@ def _calc_different_se(
         neg_af: list,
         num_it: str,
         with_ortools: bool = True,
+        with_af_constraints: bool = True,
         with_wls: bool = True,
         data_path: str = ".") -> None:
     """
@@ -878,6 +879,7 @@ def _calc_different_se(
         neg_af: List where information about negative af will save.
         num_it: Identifier for this run (e.g. iteration counter) used in all output filenames.
         with_ortools: OR-Tools solver for linear solver ("lp" algorithm). False take scipy solver.
+        with_af_constraints: Constraints for allocation factors between 0 and 1 for (W)LAV algorithm.
         with_wls: WLS include by true
         data_path: Directory where the PICKLE and CSV result files are stored.
 
@@ -923,6 +925,7 @@ def _calc_different_se(
                 algorithm="af-lp",
                 wlav=False,
                 with_ortools=with_ortools,
+                with_af_constraints=with_af_constraints,
                 linprog_method="highs-ipm",
                 maximum_iterations=100
             )
@@ -955,6 +958,7 @@ def _calc_different_se(
                 algorithm="af-lp",
                 wlav=True,
                 with_ortools=with_ortools,
+                with_af_constraints=with_af_constraints,
                 linprog_method="highs-ipm",
                 maximum_iterations=100
             )
@@ -1088,6 +1092,7 @@ def create_random_estimations_simbench(
         seed_pf: int | None = None,
         seed_m: int | None = None,
         with_ortools: bool = True,
+        with_af_constraints: bool = True,
         with_wls: bool = True,
         rv: float = .01,
         ri: float = .01,
@@ -1113,6 +1118,7 @@ def create_random_estimations_simbench(
             Parameter for :func:`_add_measurements_af`. Attention if None, no seed will be used different to normal use
             case.
         with_ortools: OR-Tools solver for linear solver ("lp" algorithm). False take scipy solver.
+        with_af_constraints: Constraints for allocation factors between 0 and 1 for (W)LAV algorithm.
         with_wls: for :func:`_calc_different_se` if true wls solver will be used.
         rv: standard deviation to apply a multiplicative perturbation to quantities for voltage
         ri: standard deviation to apply a multiplicative perturbation to quantities for current
@@ -1134,7 +1140,7 @@ def create_random_estimations_simbench(
         name_str = f"{i:03d}"  # number 1 -> 001, 56 -> 056 etc.
         k = _create_simbench_mc_case(net, seed_pf, load_range, sgen_range)
         _fill_measurement_values_from_powerflow(net, seed_m, rv, ri, rp, rq)
-        _calc_different_se(net, failures, neg_af, name_str, with_ortools, with_wls, path)
+        _calc_different_se(net, failures, neg_af, name_str, with_ortools, with_af_constraints, with_wls, path)
 
     if not failures:
         print("List is empty, very good")
@@ -2606,6 +2612,7 @@ if __name__ == "__main__":
                 None,
                 None,
                 True,
+                True,
                 False,
                 .01,
                 .01,
@@ -2662,45 +2669,45 @@ if __name__ == "__main__":
         os.makedirs(d_path, exist_ok=True)
         net_sb = sb.get_simbench_net(sb_grid_name)
 
-        net_elements_ls = get_non_empty_table_names(net_sb)
+        # net_elements_ls = get_non_empty_table_names(net_sb)
 
         p_loads = net_sb.load["p_mw"].abs()
-
-        net_sb.load["type"] = np.select(  # "1-MV-rural--0-sw"  -> wls algorithm does not work
-            [
-                p_loads <= 0.3,
-                p_loads > 0.3
-            ],
-            [
-                "residential",
-                "commercial"
-            ],
-            default="unknown"
-        )
-
-        # net_sb.load["type"] = np.select(  # "1-MV-urban--0-sw"
-        #     [
-        #         p_loads <= 0.35,
-        #         p_loads > 0.35
-        #     ],
-        #     [
-        #         "residential",
-        #         "commercial"
-        #     ],
-        #     default="unknown"
-        # )
-
-        # net_sb.load["type"] = np.select(  # "1-MV-comm--0-sw"
-        #     [
-        #         p_loads <= 0.70,
-        #         p_loads > 0.70
-        #     ],
-        #     [
-        #         "residential",
-        #         "commercial"
-        #     ],
-        #     default="unknown"
-        # )
+        if sb_grid_name == "1-MV-rural--0-sw":
+            net_sb.load["type"] = np.select(  # "1-MV-rural--0-sw"  -> wls algorithm does not work
+                [
+                    p_loads <= 0.3,
+                    p_loads > 0.3
+                ],
+                [
+                    "residential",
+                    "commercial"
+                ],
+                default="unknown"
+            )
+        if sb_grid_name == "1-MV-urban--0-sw":
+            net_sb.load["type"] = np.select(  # "1-MV-urban--0-sw"  -> wlav strange results, check these
+                [
+                    p_loads <= 0.35,
+                    p_loads > 0.35
+                ],
+                [
+                    "residential",
+                    "commercial"
+                ],
+                default="unknown"
+            )
+        if sb_grid_name == "1-MV-comm--0-sw":
+            net_sb.load["type"] = np.select(  # "1-MV-comm--0-sw"
+                [
+                    p_loads <= 0.70,
+                    p_loads > 0.70
+                ],
+                [
+                    "residential",
+                    "commercial"
+                ],
+                default="unknown"
+            )
 
         create_random_estimations_simbench(
             net_sb,
@@ -2710,6 +2717,7 @@ if __name__ == "__main__":
             None,
             None,
             False,
+            True,
             with_wls_b,
             .01,
             .01,
@@ -2752,9 +2760,27 @@ if __name__ == "__main__":
             default="unknown"
         )
         np.random.seed(112)
-        k = _create_simbench_mc_case(net_sb, None)
+        # k = _create_simbench_mc_case(net_sb, None)
         _fill_measurement_values_from_powerflow(net_sb, None, .01, .01, .01, .01)
+        res_wlav = af_wlav = estimate(
+                net_sb,
+                algorithm="af-lp",
+                wlav=True,
+                with_ortools=False,
+                with_af_constraints=True,
+                linprog_method="highs-ipm",
+                maximum_iterations=100
+            )
         res_wls = estimate(net_sb, algorithm="af-wls", maximum_iterations=200)
+        res_lav = af_lav = estimate(
+                net_sb,
+                algorithm="af-lp",
+                wlav=False,
+                with_ortools=False,
+                with_af_constraints=True,
+                linprog_method="highs-ipm",
+                maximum_iterations=100
+            )
         print(f"wls check ende")
 
 

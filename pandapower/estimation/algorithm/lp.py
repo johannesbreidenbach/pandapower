@@ -60,6 +60,7 @@ class LPAlgorithm(BaseAlgorithm):
             linprog_method: LinprogMethod = "highs",
             wlav: bool = False,
             with_ortools: bool = True,
+            with_af_constraints: bool = True,
             **kwargs
     ) -> ExtendedPPCI | bool:
         r"""
@@ -96,6 +97,8 @@ class LPAlgorithm(BaseAlgorithm):
                 ``sigma = max(r_cov, 1e-5)``. If ``False``, all measurements are weighted equally.
             with_ortools:
                 If ``True``, use the `OR-Tools solver <https://github.com/google/or-tools>`_
+            with_af_constraints:
+                Constraints for allocation factors between 0 and 1 for (W)LAV algorithm.
 
         Keyword Arguments:
             **kwargs: Currently unused. Present for API compatibility and possible future extensions.
@@ -136,8 +139,10 @@ class LPAlgorithm(BaseAlgorithm):
                 # set bounds depend on allocation factor for solving the linear programming problem
                 if af_lp:
                     # u_i >= 0, dE free, 0 <= alpha_i <= 1
-                    bounds = LPAlgorithm._create_af_bounds(n, m, len(self.eppci["clusters"]), E)
-                    # bounds = [(None, None)] * n + [(0, None)] * m  # for debugging and to compare results ToDo: remove after compare and debugging
+                    if with_af_constraints:
+                        bounds = LPAlgorithm._create_af_bounds(n, m, len(self.eppci["clusters"]), E)
+                    else:
+                        bounds = [(None, None)] * n + [(0, None)] * m  # for debugging and to compare results ToDo: remove after compare and debugging
                 else:
                     # u_i >= 0, dE free
                     bounds = [(None, None)] * n + [(0, None)] * m

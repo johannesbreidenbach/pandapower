@@ -1559,6 +1559,7 @@ def _add_se_options(
         linprog_method: LinprogMethod = "highs",
         wlav: bool = False,
         with_ortools: bool = True,
+        with_af_constraints: bool = True,
         af_init_value: float | np.ndarray = .5,
         af_target_value: float | np.ndarray | None = None,
         af_std_value: float | np.ndarray | None = None,
@@ -1576,6 +1577,7 @@ def _add_se_options(
         "linprog_method": linprog_method,
         "wlav": wlav,
         "with_ortools": with_ortools,
+        "with_af_constraints": with_af_constraints,
         "af_init_value": af_init_value,
         "af_target_value": af_target_value,
         "af_std_value": af_std_value
@@ -2433,6 +2435,7 @@ def _init_runse_options(
     linprog_method: LinprogMethod = "highs",
     wlav: bool = False,
     with_ortools: bool = True,
+    with_af_constraints: bool = True,
     af_init_value: float | np.ndarray = .5,
     af_target_value: float | np.ndarray | None = None,
     af_std_value: float | np.ndarray | None = None,
@@ -2458,6 +2461,7 @@ def _init_runse_options(
         linprog_method=linprog_method,
         wlav=wlav,
         with_ortools=with_ortools,
+        with_af_constraints=with_af_constraints,
         af_init_value=af_init_value,
         af_target_value=af_target_value,
         af_std_value=af_std_value
