@@ -3,7 +3,7 @@ import numpy as np
 
 from pandapower.estimation import estimate
 from pandapower.test.estimation.af_wlav import (
-    create_random_estimations_simbench,
+    _create_random_estimations_simbench,
     _create_simbench_mc_case,
     _fill_measurement_values_from_powerflow
 )

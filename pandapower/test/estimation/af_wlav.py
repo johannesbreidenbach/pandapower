@@ -31,10 +31,11 @@ from pandapower.plotting.plotly import simple_plotly  # , vlevel_plotly
 from pandapower.topology.create_graph import create_nxgraph
 from pandapower.plotting.generic_geodata import create_generic_coordinates
 from pandapower.plotting.plotly.measurement_traces import create_measurement_trace
+from pandapower.toolbox import nets_equal, nets_equal_keys
 
 
 # begin functions
-def get_non_empty_table_names(net: pandapowerNet) -> list[str]:
+def _get_non_empty_table_names(net: pandapowerNet) -> list[str]:
     """
     Return the names of all non-empty DataFrame tables in a pandapower network.
     """
@@ -47,7 +48,7 @@ def get_non_empty_table_names(net: pandapowerNet) -> list[str]:
     return table_names
 
 
-def deactivate_sgen_by_type(
+def _deactivate_sgen_by_type(
         net: pandapowerNet,
         sgen_type: str = "Biomass_MV"
 ) -> None:
@@ -155,25 +156,25 @@ def _check_plot_net(net: pandapowerNet) -> list[dict[str, str]]:
     return violation_records
 
 
-def apply_case(
+def _apply_simbench_case(
         net: pandapowerNet,
         case_values: dict[tuple[str, str], pd.DataFrame],
         case: str = "lPV"
 ) -> None:
     r"""
-        Apply a SimBench study case to a pandapower network.
+    Apply a SimBench study case to a pandapower network.
 
-        The values of the selected study case are assigned to the corresponding pandapower elements and parameters.
-        Empty element tables are skipped.
+    The values of the selected study case are assigned to the corresponding pandapower elements and parameters.
+    Empty element tables are skipped.
 
-        Parameters:
-            net: pandapower network that is modified in-place.
-            case_values: Absolute SimBench study case values as returned by :func:`simbench.get_absolute_values`.
-            case: Name of the study case to apply, e.g. ``bc``, ``"hL"``, ``n1``, ``hW``, ``hPV``, ``lW``, ``"lPV"``.
+    Parameters:
+        net: pandapower network that is modified in-place.
+        case_values: Absolute SimBench study case values as returned by :func:`simbench.get_absolute_values`.
+        case: Name of the study case to apply, e.g. ``bc``, ``"hL"``, ``n1``, ``hW``, ``hPV``, ``lW``, ``"lPV"``.
 
-        Returns:
-            None.
-        """
+    Returns:
+        None.
+    """
     for (element, parameter), values in case_values.items():
 
         # take only existing elements
@@ -474,6 +475,7 @@ def _create_simbench_mc_case(
 
             if "q_mvar" in table.columns:
                 table.at[idx, "q_mvar"] *= factor
+        net_pf[element] = table
 
     # run power flow with scaled operating point
     runpp(net_pf)
@@ -965,7 +967,8 @@ def _calc_different_se(
         with_ortools: bool = True,
         with_af_constraints: bool = True,
         with_wls: bool = True,
-        data_path: str = ".") -> None:
+        data_path: str = "."
+) -> None:
     """
     un three different allocation-factor-based state estimation methods (AF-WLS, AF-WLAV, AF-LAV) for a specific power
     grid and return bus voltages, angles, deviations and the allocation factors. The power grid is unobservable.
@@ -1126,7 +1129,7 @@ def _calc_different_se(
         res_af_df.to_csv(res_af_file, index=True)
 
 
-def create_random_18_bus_grid_random_estimation(
+def _create_random_18_bus_grid_random_estimation(
         data_path: str = ".",
         itr: int = 1000,
         seed: int = 112,
@@ -1196,7 +1199,7 @@ def create_random_18_bus_grid_random_estimation(
         print(f"List is not empty: {violation_constraints}")
 
 
-def create_random_estimations_simbench(
+def _create_random_estimations_simbench(
         net: pandapowerNet,
         path: str = ".",
         itr: int = 1000,
@@ -1275,7 +1278,7 @@ def create_random_estimations_simbench(
         print(f"List is not empty: {violation_constraints}")
 
 
-def load_failures(data_path: str = ".", eval_path: str = ".") -> set[tuple[str, int]]:
+def _load_failures(data_path: str = ".", eval_path: str = ".") -> set[tuple[str, int]]:
     """
     Load previously recorded failed solver runs from a text file and return them as a set of ``(solver, iteration)``
     tuples.
@@ -1307,7 +1310,7 @@ def load_failures(data_path: str = ".", eval_path: str = ".") -> set[tuple[str, 
     return failure_set
 
 
-def evaluation_af(data_path: str = ".", eval_path: str = ".") -> None:
+def _evaluation_af(data_path: str = ".", eval_path: str = ".") -> None:
     """
     Evaluate and visualize the distribution of allocation factors across all simulation runs.
 
@@ -1342,7 +1345,7 @@ def evaluation_af(data_path: str = ".", eval_path: str = ".") -> None:
     # -------------------------------------------------------------------------
     # Read in failures
     # -------------------------------------------------------------------------
-    failure_set = load_failures(data_path, eval_path)
+    failure_set = _load_failures(data_path, eval_path)
     # -------------------------------------------------------------------------
     # Read in CSV file with allocation factors
     # -------------------------------------------------------------------------
@@ -1455,7 +1458,7 @@ def evaluation_af(data_path: str = ".", eval_path: str = ".") -> None:
     print(f"saved html to: {html_file}")
 
 
-def build_eval_dataframe(result_dict, variable="vm_pu") -> pd.DataFrame:
+def _build_eval_dataframe(result_dict, variable="vm_pu") -> pd.DataFrame:
     """
     Construct an evaluation DataFrame from simulation result tables.
 
@@ -1474,7 +1477,7 @@ def build_eval_dataframe(result_dict, variable="vm_pu") -> pd.DataFrame:
     return pd.DataFrame({iteration: df[variable].astype(float) for iteration, df in result_dict.items()}).T.sort_index()
 
 
-def collect_pickle_files(folder: str, prefix: str) -> dict[int, str]:
+def _collect_pickle_files(folder: str, prefix: str) -> dict[int, str]:
     """
     Collect pickle files and map iteration numbers to file paths.
 
@@ -1496,7 +1499,7 @@ def collect_pickle_files(folder: str, prefix: str) -> dict[int, str]:
     return files
 
 
-def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0, with_wls: bool = True) -> None:
+def _evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0, with_wls: bool = True) -> None:
     """
     Evaluate voltage magnitude and branch active power estimation results for all state estimation methods and generate
     interactive HTML visualizations.
@@ -1550,21 +1553,21 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0, wi
     # -------------------------------------------------------------------------
     # Read in failures
     # -------------------------------------------------------------------------
-    failure_set = load_failures(data_path, eval_path)
+    failure_set = _load_failures(data_path, eval_path)
     # -------------------------------------------------------------------------
     # Read in bus and line data from pickle
     # -------------------------------------------------------------------------
     if with_wls:
         solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
         af_wls_path = os.path.join(data_path, "af_wls")
-        af_wls_files = collect_pickle_files(af_wls_path, "af_wls_")
+        af_wls_files = _collect_pickle_files(af_wls_path, "af_wls_")
     else:
         solver_ls = ["AF-WLAV", "AF-LAV"]
 
     af_wlav_path = os.path.join(data_path, "af_wlav")
-    af_wlav_files = collect_pickle_files(af_wlav_path, "af_wlav_")
+    af_wlav_files = _collect_pickle_files(af_wlav_path, "af_wlav_")
     af_lav_path = os.path.join(data_path, "af_lav")
-    af_lav_files = collect_pickle_files(af_lav_path, "af_lav_")
+    af_lav_files = _collect_pickle_files(af_lav_path, "af_lav_")
 
     if with_wls:
         pkl_files_dc = {
@@ -1623,8 +1626,8 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0, wi
         # Voltage magnitude
         # ---------------------------------------------------------------------
         # DataFrame for bus
-        vm_true = build_eval_dataframe(res_bus_dc[solver], "vm_pu").astype(float)
-        vm_est = build_eval_dataframe(res_bus_est_dc[solver], "vm_pu").astype(float)
+        vm_true = _build_eval_dataframe(res_bus_dc[solver], "vm_pu").astype(float)
+        vm_est = _build_eval_dataframe(res_bus_est_dc[solver], "vm_pu").astype(float)
 
         # calc mean for every bus separate
         vm_true_mean = vm_true.mean(axis=0)
@@ -1675,8 +1678,8 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0, wi
         # ---------------------------------------------------------------------
         # Branch active power same like voltage magnitude above
         # ---------------------------------------------------------------------
-        p_true = build_eval_dataframe(res_line_dc[solver], "p_from_mw").astype(float)
-        p_est = build_eval_dataframe(res_line_est_dc[solver], "p_from_mw").astype(float)
+        p_true = _build_eval_dataframe(res_line_dc[solver], "p_from_mw").astype(float)
+        p_est = _build_eval_dataframe(res_line_est_dc[solver], "p_from_mw").astype(float)
 
         p_true_mean = p_true.mean(axis=0)
         p_est_mean = p_est.mean(axis=0)
@@ -1763,7 +1766,7 @@ def evaluation_vp(data_path: str = ".", eval_path: str = ".", k: float = 3.0, wi
     print(f"saved html to: {html_ve_file}")
 
 
-def write_bus_voltage_multi_html(
+def _write_bus_voltage_multi_html(
         records: list[dict],
         eval_path: str,
         html_name: str,
@@ -1888,7 +1891,7 @@ def write_bus_voltage_multi_html(
     print(f"saved to {save_html}")
 
 
-def write_bus_power_multi_html(
+def _write_bus_power_multi_html(
         records: list[dict],
         eval_path: str,
         html_name: str,
@@ -2014,7 +2017,7 @@ def write_bus_power_multi_html(
     print(f"saved to {save_html}")
 
 
-def write_line_current_multi_html(
+def _write_line_current_multi_html(
         records: list[dict],
         eval_path: str,
         html_name: str,
@@ -2132,7 +2135,7 @@ def write_line_current_multi_html(
     print(f"saved to {save_html}")
 
 
-def evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> None:
+def _evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> None:
     """
     Evaluate bus voltages, bus active powers, and line currents.
 
@@ -2146,19 +2149,19 @@ def evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> Non
     Returns: None
     """
     # Load solver/iteration pairs for failed simulations.
-    failure_set = load_failures(data_path, eval_path)
+    failure_set = _load_failures(data_path, eval_path)
 
     # Select the solvers and collect their result files.
     if with_wls:
         solver_ls = ["AF-WLS", "AF-WLAV", "AF-LAV"]
         af_wls_path = os.path.join(data_path, "af_wls")
-        af_wls_files = collect_pickle_files(af_wls_path, "af_wls_")
+        af_wls_files = _collect_pickle_files(af_wls_path, "af_wls_")
     else:
         solver_ls = ["AF-WLAV", "AF-LAV"]
     af_wlav_path = os.path.join(data_path, "af_wlav")
-    af_wlav_files = collect_pickle_files(af_wlav_path, "af_wlav_")
+    af_wlav_files = _collect_pickle_files(af_wlav_path, "af_wlav_")
     af_lav_path = os.path.join(data_path, "af_lav")
-    af_lav_files = collect_pickle_files(af_lav_path, "af_lav_")
+    af_lav_files = _collect_pickle_files(af_lav_path, "af_lav_")
     # Map each solver to its available pickle files.
     if with_wls:
         pkl_files_dc = {
@@ -2232,13 +2235,13 @@ def evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> Non
     slack_buses = sorted(set(slack_buses))
     # Generate the evaluation plots for each solver.
     for solver in solver_ls:
-        write_bus_voltage_multi_html(
+        _write_bus_voltage_multi_html(
             bus_voltage_records[solver],
             eval_path,
             f"bus_voltages_{solver}.html",
             f"Busspannungen je Iteration - {solver}",
         )
-        write_bus_power_multi_html(
+        _write_bus_power_multi_html(
             bus_active_power_records[solver],
             eval_path,
             f"bus_power_without_slack_{solver}.html",
@@ -2247,7 +2250,7 @@ def evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> Non
             False,
             slack_buses
         )
-        write_line_current_multi_html(
+        _write_line_current_multi_html(
             line_current_records[solver],
             eval_path,
             f"line_current_{solver}.html",
@@ -2255,7 +2258,7 @@ def evaluation_bus(data_path: str, eval_path: str, with_wls: bool = True) -> Non
         )
 
 
-def show_af_simbench() -> None:
+def _show_af_simbench() -> None:
     """
     Display allocation-factor types for SimBench grids with up to 200 buses. Larger grids are skipped to keep the
     output manageable.
@@ -2278,7 +2281,7 @@ def show_af_simbench() -> None:
             print(f"Grid: {simbench_grid} to big.")
 
 
-def load_vc_af_not_in_failures(
+def _load_vc_af_not_in_failures(
         data_vc_path: str = ".",
         data_c_path: str = ".",
         eval_path: str = "."
@@ -2353,7 +2356,7 @@ def load_vc_af_not_in_failures(
     return result_set
 
 
-def eval_vc_af(
+def _eval_vc_af(
         d_c_path: str,
         d_vc_path: str,
         e_vc_path: str
@@ -2406,7 +2409,7 @@ def eval_vc_af(
     # Identify successfully completed unconstrained simulations in which at
     # least one allocation factor violates the interval 0 <= alpha <= 1.
     # violated constraints (vc) constraints (c)
-    vc_af_set = load_vc_af_not_in_failures(d_vc_path, d_c_path, e_vc_path)
+    vc_af_set = _load_vc_af_not_in_failures(d_vc_path, d_c_path, e_vc_path)
 
     # State-estimation solvers included in the comparison.
     solver_ls = ["AF-WLAV", "AF-LAV"]
@@ -2414,10 +2417,10 @@ def eval_vc_af(
     # Collect unconstrained AF-WLAV result files and map each simulation
     # iteration to its corresponding pickle file.
     af_vc_wlav_path = os.path.join(d_vc_path, "af_wlav")
-    af_vc_wlav_files = collect_pickle_files(af_vc_wlav_path, "af_wlav_")
+    af_vc_wlav_files = _collect_pickle_files(af_vc_wlav_path, "af_wlav_")
     # Collect unconstrained AF-LAV result files.
     af_vc_lav_path = os.path.join(d_vc_path, "af_lav")
-    af_vc_lav_files = collect_pickle_files(af_vc_lav_path, "af_lav_")
+    af_vc_lav_files = _collect_pickle_files(af_vc_lav_path, "af_lav_")
 
     pkl_files_vc_dc = {
         "AF-WLAV": af_vc_wlav_files,
@@ -2426,9 +2429,9 @@ def eval_vc_af(
 
     # Collect result files from simulations with constrained allocation factors.
     af_c_wlav_path = os.path.join(d_c_path, "af_wlav")
-    af_c_wlav_files = collect_pickle_files(af_c_wlav_path, "af_wlav_")
+    af_c_wlav_files = _collect_pickle_files(af_c_wlav_path, "af_wlav_")
     af_c_lav_path = os.path.join(d_c_path, "af_lav")
-    af_c_lav_files = collect_pickle_files(af_c_lav_path, "af_lav_")
+    af_c_lav_files = _collect_pickle_files(af_c_lav_path, "af_lav_")
 
     pkl_files_c_dc = {
         "AF-WLAV": af_c_wlav_files,
@@ -2567,7 +2570,7 @@ def eval_vc_af(
     os.makedirs(eval_path, exist_ok=True)
     # Generate one set of interactive HTML visualizations per solver.
     for solver in solver_ls:
-        write_bus_voltage_multi_html(
+        _write_bus_voltage_multi_html(
             combined_bus_voltage_records[solver],
             eval_path,
             f"bus_voltages_unconstrained_af_{solver}.html",
@@ -2575,7 +2578,7 @@ def eval_vc_af(
             vc_af_bool=True
         )
 
-        write_bus_power_multi_html(
+        _write_bus_power_multi_html(
             combined_bus_active_power_records[solver],
             eval_path,
             f"bus_power_without_slack_unconstrained_af_{solver}.html",
@@ -2585,7 +2588,7 @@ def eval_vc_af(
             slack_buses=slack_buses
         )
 
-        write_line_current_multi_html(
+        _write_line_current_multi_html(
             combined_line_current_records[solver],
             eval_path,
             f"line_current_unconstrained_af_{solver}.html",
@@ -2713,7 +2716,7 @@ if __name__ == "__main__":
                 case_val = sb.get_absolute_values(
                     net_sb, profiles_instead_of_study_cases=False
                 )  # if true -> time series
-                apply_case(net_sb, case_val, case_sb)  # for cases exist ext_grid vm_pu. This will set automatically and
+                _apply_simbench_case(net_sb, case_val, case_sb)  # for cases exist ext_grid vm_pu. This will set automatically and
                 # overwrite in the following for loop.
                 if ("storage", "p_mw") not in case_val and not net_sb.storage.empty:
                     net_sb.storage["p_mw"] = 0.0
@@ -2743,7 +2746,7 @@ if __name__ == "__main__":
         d_path = os.path.join(str(os.getenv("PATH_DATA_18BUS")), subdir)
         os.makedirs(d_path, exist_ok=True)
 
-        create_random_18_bus_grid_random_estimation(
+        _create_random_18_bus_grid_random_estimation(
             d_path,
             100,
             112,
@@ -2755,15 +2758,15 @@ if __name__ == "__main__":
         )
 
         e_path = os.path.join(str(os.getenv("PATH_EVAL_18BUS")), subdir)
-        evaluation_af(d_path, e_path)
-        evaluation_vp(d_path, e_path, 3.0, True)
-        evaluation_bus(d_path, e_path, True)
+        _evaluation_af(d_path, e_path)
+        _evaluation_vp(d_path, e_path, 3.0, True)
+        _evaluation_bus(d_path, e_path, True)
 
     if eval_18bus_b:
         constraints_dir = "002"
         vc_dir = "003"
 
-        eval_vc_af(
+        _eval_vc_af(
             os.path.join(str(os.getenv("PATH_DATA_18BUS")), constraints_dir),
             os.path.join(str(os.getenv("PATH_DATA_18BUS")), vc_dir),
             os.path.join(str(os.getenv("PATH_EVAL_18BUS")), vc_dir)
@@ -2784,7 +2787,7 @@ if __name__ == "__main__":
             net_sb = sb.get_simbench_net(sb_grid)
             net_sb.load["type"] = net_sb.load["type"].fillna("residential")  # only one cluster for load
 
-            create_random_estimations_simbench(
+            _create_random_estimations_simbench(
                 net=net_sb,
                 path=d_path,
                 itr=num_diff_cases,
@@ -2801,15 +2804,15 @@ if __name__ == "__main__":
                 scaling_ranges=scaling_ranges_dc
             )
             e_path = os.path.join(os.getenv("PATH_EVAL_SB", "."), sb_grid, subdir)
-            evaluation_af(d_path, e_path)
-            evaluation_vp(d_path, e_path, 3.0, False)
-            evaluation_bus(d_path, e_path, False)
+            _evaluation_af(d_path, e_path)
+            _evaluation_vp(d_path, e_path, 3.0, False)
+            _evaluation_bus(d_path, e_path, False)
             # net_sb.measurement.drop(net_sb.measurement.index, inplace=True)
             print(f"finished: {sb_grid}")
 
     if simbench_b:
-        subdir = "000"
-        sb_grid_name = "1-MV-comm--0-sw"  # "1-MV-rural--0-sw" "1-MV-urban--0-sw" ## "1-MV-comm--0-sw" -> voltage looks good for state estimation
+        subdir = "021"
+        sb_grid_name = "1-MV-urban--0-sw"  # "1-MV-rural--0-sw" "1-MV-urban--0-sw" ## "1-MV-comm--0-sw" -> voltage looks good for state estimation
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name, subdir)
         os.makedirs(d_path, exist_ok=True)
         path_para = os.path.join(d_path, "simulation_parameters.csv")
@@ -2825,8 +2828,8 @@ if __name__ == "__main__":
         print(f"deleted sgen: {net_sb.sgen.loc[sgen_indices]}")
         net_sb.sgen.drop(index=sgen_indices, inplace=True)
 
-        # deactivate_sgen_by_type(net_sb, "Biomass_MV")  # wls get problems with in_service = False ToDo: check this
-        # net_elements_ls = get_non_empty_table_names(net_sb)
+        # _deactivate_sgen_by_type(net_sb, "Biomass_MV")  # wls get problems with in_service = False ToDo: check this
+        # net_elements_ls = _get_non_empty_table_names(net_sb)
 
         _drop_not_used_measurement_se(net_sb)
 
@@ -2875,7 +2878,7 @@ if __name__ == "__main__":
         if missing_scaling:
             raise ValueError(f"Missing scaling ranges for: {missing_scaling}")
 
-        create_random_estimations_simbench(
+        _create_random_estimations_simbench(
             net=net_sb,
             path=d_path,
             itr=num_diff_cases,
@@ -2893,41 +2896,72 @@ if __name__ == "__main__":
         )
 
         e_path = os.path.join(os.getenv("PATH_EVAL_SB", "."), sb_grid_name, subdir)
-        evaluation_af(d_path, e_path)
-        evaluation_vp(d_path, e_path, 3.0, with_wls_b)
-        evaluation_bus(d_path, e_path, with_wls_b)
+        _evaluation_af(d_path, e_path)
+        _evaluation_vp(d_path, e_path, 3.0, with_wls_b)
+        _evaluation_bus(d_path, e_path, with_wls_b)
 
     if eval_sb_b:
-        constraints_dir = "000"
-        vc_dir = "001"
-        sb_grid_name = "1-MV-comm--0-sw"
-        eval_vc_af(
+        constraints_dir = "020"
+        vc_dir = "021"
+        sb_grid_name = "1-MV-urban--0-sw"
+        _eval_vc_af(
             os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, constraints_dir),
             os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, vc_dir),
             os.path.join(str(os.getenv("PATH_EVAL_SB")), sb_grid_name, vc_dir)
         )
 
-    linprog_b: bool = False
+    linprog_b: bool = True
     if linprog_b:
-        net_prob = from_pickle(
-            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/014/af_wlav/af_wlav_065.p"
-            # '/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/011/af_wlav/prob_af_wlav_048.p'
+        # net_prob = from_pickle(
+        #     "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/014/af_wlav/af_wlav_065.p"
+        #     # '/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/011/af_wlav/prob_af_wlav_048.p'
+        # )
+
+        net_ref = sb.get_simbench_net("1-MV-urban--0-sw")
+
+        net_w_lav_10 = from_pickle(
+            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/010/af_wlav/af_wlav_000.p"
         )
 
-        af_w_lav = copy.deepcopy(net_prob)
-        af_lav = copy.deepcopy(net_prob)
-        af_wls = copy.deepcopy(net_prob)
+        net_w_lav_20 = from_pickle(
+            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/020/af_wlav/af_wlav_000.p"
+        )
 
-        res_lav = estimate(af_lav, algorithm="af-lp", wlav=False, with_ortools=False)
-        res_wls = estimate(af_wls, algorithm="af-wls")
-        res_w_lav = estimate(
-            af_w_lav,
+        # net_w_lav_20.measurement = net_w_lav_10.measurement
+
+        res_w_lav_10 = estimate(
+            net_w_lav_10,
             algorithm="af-lp",
             wlav=True,
             with_ortools=False,
             linprog_method="highs-ipm",
             maximum_iterations=200
         )
+
+        res_w_lav_20 = estimate(
+            net_w_lav_20,
+            algorithm="af-lp",
+            wlav=True,
+            with_ortools=False,
+            linprog_method="highs-ipm",
+            maximum_iterations=200
+        )
+
+        print(f"End")
+        # af_w_lav = copy.deepcopy(net_prob)
+        # af_lav = copy.deepcopy(net_prob)
+        # af_wls = copy.deepcopy(net_prob)
+        #
+        # res_lav = estimate(af_lav, algorithm="af-lp", wlav=False, with_ortools=False)
+        # res_wls = estimate(af_wls, algorithm="af-wls")
+        # res_w_lav = estimate(
+        #     af_w_lav,
+        #     algorithm="af-lp",
+        #     wlav=True,
+        #     with_ortools=False,
+        #     linprog_method="highs-ipm",
+        #     maximum_iterations=200
+        # )
 
     wls_check_b: bool = False
     if wls_check_b:
