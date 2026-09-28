@@ -31,8 +31,7 @@ from pandapower.plotting.plotly import simple_plotly  # , vlevel_plotly
 from pandapower.topology.create_graph import create_nxgraph
 from pandapower.plotting.generic_geodata import create_generic_coordinates
 from pandapower.plotting.plotly.measurement_traces import create_measurement_trace
-from pandapower.toolbox import nets_equal, nets_equal_keys
-
+# from pandapower.toolbox import nets_equal, nets_equal_keys
 
 # begin functions
 def _get_non_empty_table_names(net: pandapowerNet) -> list[str]:
@@ -2625,11 +2624,16 @@ def _get_allocation_factor_names(net: pandapowerNet) -> tuple[list[str], int]:
 
 def _drop_not_used_measurement_se(net: pandapowerNet) -> None:
     """
-    Remove current measurements and bus active/reactive power measurements for state estimation. The measurement table
-    of ``net`` is modified in place. Reason state estimation can work better without these measurements?
+    Remove measurements not used for state estimation and duplicate measurement locations.
+
+    Current measurements and active/reactive power measurements assigned to buses are removed. If multiple measurements
+    have the same measurement type, element type, element, side, subnet and voltage level, only the first is retained.
+    Missing optional columns are excluded from the duplicate comparison. The measurement name, value and standard
+    deviation are not considered when identifying duplicates. The measurement table is modified in place and its index
+    is reset. Reason: state estimation can work better without these measurements?
 
     Parameters:
-        net: power net with different measurements.
+        net: net with different measurements.
 
     Returns: None
     """
@@ -2646,6 +2650,12 @@ def _drop_not_used_measurement_se(net: pandapowerNet) -> None:
         index=measurements.index[current_mask | bus_power_mask],
         inplace=True
     )
+
+    # drop duplicated measurements and keep the first
+    identity_elements = ["measurement_type", "element_type", "element", "side", "subnet", "voltLvl"]
+    identity_columns = [column for column in identity_elements if column in measurements.columns]
+    measurements.drop_duplicates(subset=identity_columns, keep="first", inplace=True)
+
     measurements.reset_index(drop=True, inplace=True)
 
 
@@ -2680,7 +2690,7 @@ if __name__ == "__main__":
     scaling_ranges_dc: dict[str, tuple[float, float]] = {
         "Biomass_MV": (0.8, 1.0),
         "Hydro_MV": (0.6, 1.0),
-        "PV_MV": (0.2, 1.0),
+        "PV_MV": (0.6, 0.9),
         "Wind_MV": (0.3, 1.0),
         "commercial": (0.3, 0.6),
         "lv_RES": (0.3, 0.8),
@@ -2910,7 +2920,7 @@ if __name__ == "__main__":
             os.path.join(str(os.getenv("PATH_EVAL_SB")), sb_grid_name, vc_dir)
         )
 
-    linprog_b: bool = True
+    linprog_b: bool = False
     if linprog_b:
         # net_prob = from_pickle(
         #     "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/014/af_wlav/af_wlav_065.p"
