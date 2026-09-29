@@ -2646,22 +2646,19 @@ def _drop_not_used_measurement_se(net: pandapowerNet) -> None:
     bus_power_mask = (measurements["measurement_type"].isin(["p", "q"]) & measurements["element_type"].eq("bus"))
 
     # Remove the selected measurements and rebuild the row index.
-    measurements.drop(
-        index=measurements.index[current_mask | bus_power_mask],
-        inplace=True
-    )
+    measurements.drop(index=measurements.index[current_mask | bus_power_mask], inplace=True)
 
-    # drop duplicated measurements and keep the first
+    # drop duplicated measurements and keep the first one and reset index
     identity_elements = ["measurement_type", "element_type", "element", "side", "subnet", "voltLvl"]
     identity_columns = [column for column in identity_elements if column in measurements.columns]
     measurements.drop_duplicates(subset=identity_columns, keep="first", inplace=True)
-
     measurements.reset_index(drop=True, inplace=True)
 
 
 if __name__ == "__main__":
     time_start = time.perf_counter()
     load_dotenv()
+
     ## chose the case
     test_b: bool = False
     test_case_b: bool = False
@@ -2821,14 +2818,13 @@ if __name__ == "__main__":
             print(f"finished: {sb_grid}")
 
     if simbench_b:
-        subdir = "021"
+        subdir = "000"
         sb_grid_name = "1-MV-urban--0-sw"  # "1-MV-rural--0-sw" "1-MV-urban--0-sw" ## "1-MV-comm--0-sw" -> voltage looks good for state estimation
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name, subdir)
         os.makedirs(d_path, exist_ok=True)
         path_para = os.path.join(d_path, "simulation_parameters.csv")
         para_df.to_csv(path_para, sep=";", decimal=",", index=False)
         print(f"simulation parameters saved to: {path_para}")
-        path_scale = os.path.join(d_path, "simulation_parameters.csv")
 
         net_sb = sb.get_simbench_net(sb_grid_name)
 
@@ -2883,7 +2879,6 @@ if __name__ == "__main__":
             )
 
         cluster_ls, cluster_nb = _get_allocation_factor_names(net_sb)
-
         missing_scaling = [af for af in cluster_ls if af not in scaling_ranges_dc]
         if missing_scaling:
             raise ValueError(f"Missing scaling ranges for: {missing_scaling}")
@@ -2911,9 +2906,9 @@ if __name__ == "__main__":
         _evaluation_bus(d_path, e_path, with_wls_b)
 
     if eval_sb_b:
-        constraints_dir = "020"
-        vc_dir = "021"
-        sb_grid_name = "1-MV-urban--0-sw"
+        constraints_dir = "000"
+        vc_dir = "001"
+        sb_grid_name = "1-MV-comm--0-sw"
         _eval_vc_af(
             os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, constraints_dir),
             os.path.join(str(os.getenv("PATH_DATA_SB")), sb_grid_name, vc_dir),
@@ -2927,7 +2922,15 @@ if __name__ == "__main__":
         #     # '/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/011/af_wlav/prob_af_wlav_048.p'
         # )
 
-        net_ref = sb.get_simbench_net("1-MV-urban--0-sw")
+        net_ref = sb.get_simbench_net("1-MV-rural--0-sw")
+
+        net_w_lav_30 = from_pickle(
+            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/030/af_wlav/af_wlav_000.p"
+        )
+
+        net_w_lav_32 = from_pickle(
+            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/032/af_wlav/af_wlav_000.p"
+        )
 
         net_w_lav_10 = from_pickle(
             "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/010/af_wlav/af_wlav_000.p"
@@ -2957,7 +2960,6 @@ if __name__ == "__main__":
             maximum_iterations=200
         )
 
-        print(f"End")
         # af_w_lav = copy.deepcopy(net_prob)
         # af_lav = copy.deepcopy(net_prob)
         # af_wls = copy.deepcopy(net_prob)
@@ -2972,6 +2974,8 @@ if __name__ == "__main__":
         #     linprog_method="highs-ipm",
         #     maximum_iterations=200
         # )
+
+        print(f"End")
 
     wls_check_b: bool = False
     if wls_check_b:
