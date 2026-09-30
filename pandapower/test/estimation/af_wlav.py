@@ -2671,6 +2671,7 @@ if __name__ == "__main__":
     simbench_ls_b: bool = False
     simbench_b: bool = False
     eval_sb_b: bool = False
+    plot_grid_b: bool = False
 
     ## set simulation parameters
     num_diff_cases: int = 100
@@ -2915,120 +2916,12 @@ if __name__ == "__main__":
             os.path.join(str(os.getenv("PATH_EVAL_SB")), sb_grid_name, vc_dir)
         )
 
-    linprog_b: bool = False
-    if linprog_b:
-        # net_prob = from_pickle(
-        #     "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/014/af_wlav/af_wlav_065.p"
-        #     # '/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-comm--0-sw/011/af_wlav/prob_af_wlav_048.p'
-        # )
-
-        net_ref = sb.get_simbench_net("1-MV-rural--0-sw")
-
-        net_w_lav_30 = from_pickle(
-            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/030/af_wlav/af_wlav_000.p"
-        )
-
-        net_w_lav_32 = from_pickle(
-            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/032/af_wlav/af_wlav_000.p"
-        )
-
-        net_w_lav_10 = from_pickle(
-            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/010/af_wlav/af_wlav_000.p"
-        )
-
-        net_w_lav_20 = from_pickle(
-            "/mnt/data/pandapower/state-estimation/simbench_grid/1-MV-urban--0-sw/020/af_wlav/af_wlav_000.p"
-        )
-
-        # net_w_lav_20.measurement = net_w_lav_10.measurement
-
-        res_w_lav_10 = estimate(
-            net_w_lav_10,
-            algorithm="af-lp",
-            wlav=True,
-            with_ortools=False,
-            linprog_method="highs-ipm",
-            maximum_iterations=200
-        )
-
-        res_w_lav_20 = estimate(
-            net_w_lav_20,
-            algorithm="af-lp",
-            wlav=True,
-            with_ortools=False,
-            linprog_method="highs-ipm",
-            maximum_iterations=200
-        )
-
-        # af_w_lav = copy.deepcopy(net_prob)
-        # af_lav = copy.deepcopy(net_prob)
-        # af_wls = copy.deepcopy(net_prob)
-        #
-        # res_lav = estimate(af_lav, algorithm="af-lp", wlav=False, with_ortools=False)
-        # res_wls = estimate(af_wls, algorithm="af-wls")
-        # res_w_lav = estimate(
-        #     af_w_lav,
-        #     algorithm="af-lp",
-        #     wlav=True,
-        #     with_ortools=False,
-        #     linprog_method="highs-ipm",
-        #     maximum_iterations=200
-        # )
-
-        print(f"End")
-
-    wls_check_b: bool = False
-    if wls_check_b:
+    if plot_grid_b:
         sb_grid_name = "1-MV-comm--0-sw"  ## "1-MV-rural--0-sw" "1-MV-urban--0-sw"
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name)
         net_sb = sb.get_simbench_net(sb_grid_name)
-        # runpp(net_sb)
-
-        p_loads = net_sb.load["p_mw"].abs()
-        if sb_grid_name == "1-MV-urban--0-sw":
-            net_sb.load["type"] = np.select(  # "1-MV-urban--0-sw"  -> wlav strange results, check these
-                [
-                    p_loads <= 0.35,
-                    p_loads > 0.35
-                ],
-                [
-                    "residential",
-                    "commercial"
-                ],
-                default="unknown"
-            )
-        if sb_grid_name == "1-MV-rural--0-sw":
-            net_sb.load["type"] = np.select(  # "1-MV-rural--0-sw"  -> wls algorithm does not work
-                [
-                    p_loads <= 0.3,
-                    p_loads > 0.3
-                ],
-                [
-                    "residential",
-                    "commercial"
-                ],
-                default="unknown"
-            )
-        if sb_grid_name == "1-MV-comm--0-sw":
-            net_sb.load["type"] = np.select(  # "1-MV-comm--0-sw"
-                [
-                    p_loads <= 0.70,
-                    p_loads > 0.70
-                ],
-                [
-                    "residential",
-                    "commercial"
-                ],
-                default="unknown"
-            )
-
-        cluster_ls, cluster_nb = _get_allocation_factor_names(net_sb)
-        missing_scaling = [af for af in cluster_ls if af not in scaling_ranges_dc]
-        if missing_scaling:
-            raise ValueError(f"Missing scaling ranges for: {missing_scaling}")
 
         _drop_not_used_measurement_se(net_sb)
-
         np.random.seed(112)
         k = _create_simbench_mc_case(net_sb, None, scaling_ranges=scaling_ranges_dc)
         _fill_measurement_values_from_powerflow(net_sb, None, .01, .01, .01, .01)
@@ -3045,28 +2938,23 @@ if __name__ == "__main__":
             figsize=2.0,
             bus_size=8,
             additional_traces=meas_traces
-        )
+        )  # do not show bus-bus-switches which are closed -> urban shows no connection between trafo and grid
 
-        res_wlav = estimate(
-            net_sb,
-            algorithm="af-lp",
-            wlav=True,
-            with_ortools=False,
-            with_af_constraints=True,
-            linprog_method="highs-ipm",
-            maximum_iterations=100
-        )
-        res_wls = estimate(net_sb, algorithm="af-wls", maximum_iterations=200)
-        res_lav = af_lav = estimate(
-            net_sb,
-            algorithm="af-lp",
-            wlav=False,
-            with_ortools=False,
-            with_af_constraints=True,
-            linprog_method="highs-ipm",
-            maximum_iterations=100
-        )
-        print(f"wls check ende")
+    wls_in_service_b: bool = True
+    if wls_in_service_b:
+
+        # net_rural_ref = sb.get_simbench_net("1-MV-rural--0-sw")
+        # net_wls_rural_30 = from_pickle(os.getenv("FILE_03"))
+        # net_wls_rural_32 = from_pickle(os.getenv("FILE_04"))
+
+        net_comm_ref = sb.get_simbench_net("1-MV-comm--0-sw")
+        net_wls_comm_100 = from_pickle(os.getenv("FILE_01"))
+        net_wls_comm_102 = from_pickle(os.getenv("FILE_02"))
+
+        res_wls_comm_100 = estimate(net_wls_comm_100, algorithm="af-wls",maximum_iterations=100)
+
+        res_wls_comm_102 = estimate(net_wls_comm_102, algorithm="af-wls",maximum_iterations=100)
+        print(f"no pass")
 
     runtime = time.perf_counter() - time_start
     print(f"calculated in: {timedelta(seconds=runtime)}")
