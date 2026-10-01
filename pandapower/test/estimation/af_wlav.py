@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 
 # imports from pandapower
 import pandapower.networks as pn
+from pandapower.diagnostic import diagnostic
 from pandapower import to_pickle, from_pickle
 from pandapower.run import runpp
 from pandapower.estimation import estimate
@@ -32,6 +33,11 @@ from pandapower.topology.create_graph import create_nxgraph
 from pandapower.plotting.generic_geodata import create_generic_coordinates
 from pandapower.plotting.plotly.measurement_traces import create_measurement_trace
 # from pandapower.toolbox import nets_equal, nets_equal_keys
+import logging
+
+logging.getLogger("numba").setLevel(logging.WARNING)
+logging.getLogger("pandapower").setLevel(logging.INFO)
+
 
 # begin functions
 def _get_non_empty_table_names(net: pandapowerNet) -> list[str]:
@@ -2951,7 +2957,17 @@ if __name__ == "__main__":
         net_wls_comm_100 = from_pickle(os.getenv("FILE_01"))
         net_wls_comm_102 = from_pickle(os.getenv("FILE_02"))
 
-        res_wls_comm_100 = estimate(net_wls_comm_100, algorithm="af-wls",maximum_iterations=100)
+        # res_wls_comm_100 = estimate(net_wls_comm_100, algorithm="af-wls",maximum_iterations=100)
+
+        res_af_wlav = estimate(
+            net_wls_comm_100,
+            algorithm="af-lp",
+            wlav=True,
+            with_ortools=False,
+            with_af_constraints=True,
+            linprog_method="highs-ipm",
+            maximum_iterations=100
+        )
 
         res_wls_comm_102 = estimate(net_wls_comm_102, algorithm="af-wls",maximum_iterations=100)
         print(f"no pass")

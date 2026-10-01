@@ -225,7 +225,7 @@ class LPAlgorithm(BaseAlgorithm):
             self.hx = sem.create_hx(E)
             self.r = np.asarray(sem.create_rx(E)).reshape(-1)
         this does not work:
-            self.hx =self.hx = sem.create_hx(E)
+            self.hx = sem.create_hx(E)
             self.r = np.asarray(sem.create_rx(E)).reshape(-1)
             self.H = np.asarray(sem.create_hx_jacobian(eppci.E))
         """

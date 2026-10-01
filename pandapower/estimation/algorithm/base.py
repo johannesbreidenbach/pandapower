@@ -62,12 +62,10 @@ class BaseAlgorithm:
         if measurements_available < measurements_required:
             self.logger.error("System is not observable (cancelling)")
             self.logger.error(
-                f"Measurements available: {measurements_available}. "
-                f"Measurements required: {measurements_required}"
+                f"Measurements available: {measurements_available}. Measurements required: {measurements_required}"
             )
             raise UserWarning(
-                f"Measurements available: {measurements_available}. "
-                f"Measurements required: {measurements_required}"
+                f"Measurements available: {measurements_available}. Measurements required: {measurements_required}"
             )
 
     def check_result(self, current_error: float, cur_it: int) -> None:

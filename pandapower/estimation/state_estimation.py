@@ -2,10 +2,9 @@
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
 from datetime import datetime
-from typing import overload, Literal
+from typing import Literal
 
 import numpy as np
-from typing_extensions import deprecated
 from scipy.stats import chi2
 
 from pandapower import pandapowerNet
@@ -253,17 +252,6 @@ class StateEstimation:
         # variables for chi^2 / rn_max tests
         self.delta = None
         self.bad_data_present = None
-
-    @overload
-    def estimate(self, v_start="flat", delta_start="flat", zero_injection=None,
-                 fuse_buses_with_bb_switch="all", debug_mode=False, **opt_vars):
-        ...
-
-    @overload
-    @deprecated("algorithm should be set via init. Use of algorithm key is deprecated.")
-    def estimate(self, v_start="flat", delta_start="flat", zero_injection=None,
-                 fuse_buses_with_bb_switch="all", algorithm="wls", debug_mode=False, **opt_vars):
-        ...
 
     def estimate(
             self,

@@ -181,7 +181,8 @@ Since Pandapower 2.0.1 further algorithms and estimators (robust estimators) are
 +-------------------------------------+----------------------+
 | wls with zero injection constraints |                      |
 +-------------------------------------+----------------------+
-| lp                                  |                      |
+| lp                                  | lav, wlav, af-lav,   |
+|                                     | af-wlav              |
 +-------------------------------------+----------------------+
 | irwls                               | wls, shgm            |
 +-------------------------------------+----------------------+
