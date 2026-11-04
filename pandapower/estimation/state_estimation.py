@@ -18,6 +18,7 @@ from pandapower.estimation.results import eppci2pp
 from pandapower.estimation.util import set_bb_switch_impedance, reset_bb_switch_impedance
 
 import logging
+
 std_logger = logging.getLogger(__name__)
 
 ALGORITHM_MAPPING = {"wls": WLSAlgorithm,
@@ -40,12 +41,12 @@ OPT_VAR_DEFAULTS = {"estimator": "wls",
 
 def estimate(
         net: pandapowerNet,
-        algorithm: ALGORITHM_SE ="wls",
+        algorithm: ALGORITHM_SE = "wls",
         init: str = "flat",
         tolerance: float = 1e-6,
         maximum_iterations: int = 50,
-        zero_injection = "aux_bus",
-        fuse_buses_with_bb_switch = "all",
+        zero_injection="aux_bus",
+        fuse_buses_with_bb_switch="all",
         debug_mode: bool = False,
         **opt_vars
 ) -> dict[str, object]:
@@ -115,13 +116,18 @@ def estimate(
         af_init_value (float | np.ndarray, .5):
             Initial values for the af in E vector. One Value for all or an array for explicite. The
             value 0.5 is default.
-        af_target_value (float | np.ndarray | None, None):
-            Optional pseudo-measurements (soft priors) for the af. Can be a scalar, a numpy array or None. Acts as a
+        af_target_value (float | list[float | None] | np.ndarray | None, None):
+            Optional pseudo-measurements (soft priors) for the af. Can be a scalar, a list, a numpy array or None.
+            Scalars and single-element lists/arrays are broadcast to all clusters. Otherwise, provide one entry per
+            cluster in the internal cluster order. Paired None entries in af_target_value and af_std_value disable
+            the prior for that cluster; its allocation factor remains part of the estimated state. Acts as a
             preferred value for the af (e.g. ``alpha=0.4``) in weakly observable cases and regularizes the estimation
             toward this value, but does not enforce it if it conflicts with the overall optimization of the state
             estimator. Specific value 0.4 used in a grid-operator use case.
-        af_std_value (float | np.ndarray | None, None):
-            Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, a numpy array or None.
+        af_std_value (float | list[float | None] | np.ndarray | None, None):
+            Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, a list, a numpy array
+            or None. After broadcasting, None positions must match those in af_target_value. Active standard
+            deviations must be finite and greater than zero. Both parameters may be None to disable all AF priors.
             Controls how strongly the pseudo-measurements for the af (e.g. 0.15) influence the
             estimation: smaller values imply a stronger pull toward `af_target_value`, larger values make the
             prior weaker. Specific value 0.15 used in a grid-operator use case.
@@ -255,15 +261,15 @@ class StateEstimation:
 
     def estimate(
             self,
-             v_start="flat",
-             delta_start="flat",
-             zero_injection=None,
-             fuse_buses_with_bb_switch="all",
-             init: str = "flat",
-             tolerance: float = 1e-6,
-             maximum_iterations: int = 50,
-             debug_mode=False,
-             **opt_vars
+            v_start="flat",
+            delta_start="flat",
+            zero_injection=None,
+            fuse_buses_with_bb_switch="all",
+            init: str = "flat",
+            tolerance: float = 1e-6,
+            maximum_iterations: int = 50,
+            debug_mode: bool = False,
+            **opt_vars
     ) -> dict[str, object]:
         """
         The function estimate is the main function of the module. It takes the inputs v_start and delta_start to
@@ -361,7 +367,7 @@ class StateEstimation:
         af_std_value = opt_vars.get("af_std_value", OPT_VAR_DEFAULTS["af_std_value"])
 
         if (af_target_value is None) != (af_std_value is None):
-            raise ValueError("af_target_value and af_std_value are both None or both not None.")
+            raise ValueError("af_target_value and af_std_value must both be None or both be provided.")
         self.net, self.ppc, self.eppci = pp2eppci(
             self.net,
             v_start=v_start,
@@ -380,7 +386,7 @@ class StateEstimation:
             linprog_method=opt_vars.get("linprog_method", OPT_VAR_DEFAULTS["linprog_method"]),
             wlav=opt_vars.get("wlav", OPT_VAR_DEFAULTS["wlav"]),
             with_ortools=opt_vars.get("with_ortools", OPT_VAR_DEFAULTS["with_ortools"]),
-            with_af_constraints= opt_vars.get("with_af_constraints", OPT_VAR_DEFAULTS["with_af_constraints"]),
+            with_af_constraints=opt_vars.get("with_af_constraints", OPT_VAR_DEFAULTS["with_af_constraints"]),
             af_init_value=opt_vars.get("af_init_value", OPT_VAR_DEFAULTS["af_init_value"]),
             af_target_value=af_target_value,
             af_std_value=af_std_value
@@ -403,7 +409,7 @@ class StateEstimation:
         # if recycle is not wished, reset ppc, ppci
         if not self.recycle:
             self.ppc, self.eppci = None, None
-        
+
         if self.algorithm in ["wls", "af-wls", "lp", "af-lp"]:
             se_results = {
                 "success": self.solver.successful,
@@ -412,7 +418,7 @@ class StateEstimation:
                 "allocation_factors": self.solver.af,
                 "completion_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         else:
-            se_results = {"success":self.solver.successful}
+            se_results = {"success": self.solver.successful}
 
         return se_results
 
@@ -420,7 +426,7 @@ class StateEstimation:
             self,
             v_in_out=None,
             delta_in_out=None,
-            calculate_voltage_angles :bool = True,
+            calculate_voltage_angles: bool = True,
             chi2_prob_false=0.05
     ) -> bool | None:
         """

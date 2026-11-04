@@ -1,6 +1,7 @@
 # Copyright (c) 2016-2026 by University of Kassel and Fraunhofer Institute for Energy Economics
 # and Energy System Technology (IEE), Kassel. All rights reserved.
 
+from __future__ import annotations
 
 from collections import UserDict
 from collections.abc import Iterable
@@ -34,12 +35,14 @@ from pandapower.estimation.idx_brch import (P_FROM, P_FROM_IDX, P_FROM_STD,
                                             IM_TO, IM_TO_IDX, IM_TO_STD,
                                             IA_TO, IA_TO_IDX, IA_TO_STD,
                                             branch_cols_se)
+
 if TYPE_CHECKING:
     from pandapower.estimation.state_estimation import ALGORITHM_SE
     from pandapower.estimation.algorithm.base import ESTIMATOR_SE_TYPES
     from pandapower.estimation.algorithm.lp import LinprogMethod
 
 import logging
+
 std_logger = logging.getLogger(__name__)
 ZERO_INJECTION_STD_DEV = 0.001
 
@@ -91,8 +94,8 @@ def _init_ppc(
         with_ortools: bool = True,
         with_af_constraints: bool = True,
         af_init_value: float | np.ndarray = .5,
-        af_target_value: float | np.ndarray | None = None,
-        af_std_value: float | np.ndarray | None = None,
+        af_target_value: float | list[float | None] | np.ndarray | None = None,
+        af_std_value: float | list[float | None] | np.ndarray | None = None,
 ):
     # select elements in service and convert pandapower ppc to ppc
     _init_runse_options(
@@ -111,7 +114,7 @@ def _init_ppc(
         linprog_method=linprog_method,
         wlav=wlav,
         with_ortools=with_ortools,
-        with_af_constraints= with_af_constraints,
+        with_af_constraints=with_af_constraints,
         af_init_value=af_init_value,
         af_target_value=af_target_value,
         af_std_value=af_std_value
@@ -128,7 +131,6 @@ def _init_ppc(
         ppci["bus"][:, [2, 3]] = pq_backup
 
     return ppc, ppci
-
 
 
 def _calculate_weighted_measurements(measurements, grouped_column: str):
@@ -499,13 +501,13 @@ def _add_measurements_to_ppci(net, ppci, zero_injection, algorithm):
         std_logger.warning("Measurement defined in pp-grid does not exist in ppci, will be deleted!")
         meas_bus = meas_bus[map_bus[meas_bus["element"].values.astype(np.int64)] < ppci["bus"].shape[0]]
 
-   # Create empty append array for bus measurements
+    # Create empty append array for bus measurements
     bus_append = np.full((ppci["bus"].shape[0], bus_cols_se), np.nan, dtype=ppci["bus"].dtype)
 
     # Add bus measurements (v, va, p, q)
     _add_measurements_to_bus(meas_bus, bus_append, map_bus)
 
-   # Add zero injection measurements if specified
+    # Add zero injection measurements if specified
     bus_append = _add_zero_injection(net, ppci, bus_append, zero_injection)
 
     # Add virtual measurements for artificial buses (from open line switches)
@@ -530,7 +532,7 @@ def _add_measurements_to_ppci(net, ppci, zero_injection, algorithm):
     else:
         ppci["bus"][:, bus_cols: bus_cols + bus_cols_se] = bus_append
 
-   # Integrate new measurement columns into ppci branch matrix
+    # Integrate new measurement columns into ppci branch matrix
     if ppci["branch"].shape[1] == branch_cols:
         ppci["branch"] = np.hstack((ppci["branch"], branch_append))
     else:
@@ -551,7 +553,7 @@ def _add_zero_injection(net, ppci, bus_append, zero_injection):
     :param bus_append: added columns to the ppci bus with zero injection label
     :param zero_injection: parameter to control which bus to be identified as zero injection
         - None: no zero injection buses added
-        - "aux_bus": only auxiliary buses created in ppc 
+        - "aux_bus": only auxiliary buses created in ppc
         - "no_inj_bus": aux buses + buses without load, gen, sgen, etc.
         - "zero_pwr_bus": aux buses + all buses with a zero power (also if there is load, sgen, etc.)
     :return bus_append: added columns
@@ -573,8 +575,9 @@ def _add_zero_injection(net, ppci, bus_append, zero_injection):
                 bus_append[zero_inj_bus_mask, ZERO_INJ_FLAG] = True
                 if zero_injection == "no_inj_bus":
                     b = np.array([], dtype=np.int64)
-                    pq_elements = ["load", "motor", "sgen", "storage", "ward", "xward", 
-                                   "asymmetric_load", "asymmetric_sgen"]
+                    pq_elements = [
+                        "load", "motor", "sgen", "storage", "ward", "xward", "asymmetric_load", "asymmetric_sgen"
+                    ]
                     bus_lookup = net["_pd2ppc_lookups"]["bus"]
                     for element in pq_elements:
                         tab = net[element]
@@ -599,6 +602,40 @@ def _add_zero_injection(net, ppci, bus_append, zero_injection):
         bus_append[zero_inj_bus, Q_STD] = ZERO_INJECTION_STD_DEV
         bus_append[zero_inj_bus, Q_IDX] = -1
     return bus_append
+
+
+def _broadcast_to_clusters(
+        af_value: float | list[float | None] | np.ndarray,
+        num_clusters: int,
+        name: str,
+) -> np.ndarray:
+    """
+    Broadcast an allocation factor input to one value per cluster.
+
+    Scalars and single-element lists/arrays are broadcast to every cluster. Otherwise, the input must contain
+    exactly one entry per cluster. The object dtype keeps None distinct from numeric NaN.
+
+    Parameters:
+        af_value: Scalar value or list/array with one entry per cluster (may contain None).
+        num_clusters: Number of allocation factor clusters.
+        name: Parameter name used in the error message.
+
+    Raises:
+        ValueError: If the input has more than one entry but not exactly one entry per cluster.
+
+    Returns:
+        Cluster values with shape (num_clusters,) and object dtype.
+    """
+    # Keep None distinct from numeric NaN until the missing-value check.
+    values = np.asarray(af_value, dtype=object).reshape(-1)
+    if values.size == 1:
+        return np.full(num_clusters, values[0], dtype=object)
+    if values.size != num_clusters:
+        raise ValueError(
+            f"{name} must be a scalar or have exactly {num_clusters} values, "
+            f"but got {values.size} values."
+        )
+    return values
 
 
 def _prepare_af(af_init_value: float | np.ndarray, num_clusters: int) -> np.ndarray:
@@ -631,11 +668,70 @@ def _prepare_af(af_init_value: float | np.ndarray, num_clusters: int) -> np.ndar
     return af_init
 
 
+def _prepare_af_priors(
+        af_target_value: float | list[float | None] | np.ndarray | None,
+        af_std_value: float | list[float | None] | np.ndarray | None,
+        num_clusters: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Return AF targets, standard deviations and original indices for enabled priors.
+
+    Scalars and single-element arrays/lists are broadcast to every cluster. Otherwise, inputs must contain one entry per
+    cluster. A prior is disabled only when both entries for its cluster are None. Numeric NaN/inf are invalid.
+
+    Parameters:
+        af_target_value:
+            Optional pseudo-measurements (soft priors) for the allocation factors.
+        af_std_value:
+            Optional standard deviation(s) corresponding to `af_target_value`.
+        num_clusters: number of allocation factor clusters.
+
+    Raises:
+        ValueError:
+            If only one input is None, an input has an invalid size, None entries occur at different cluster positions,
+            or active entries fail numeric validation.
+
+    Returns:
+        A tuple containing the active target values, their standard deviations, and their original zero-based cluster
+        indices, all in cluster order. The first two arrays have dtype float64 and the index array has dtype int64. All
+        three arrays are empty if no priors are active.
+    """
+    if af_target_value is None and af_std_value is None:
+        return (np.empty(0, dtype=np.float64),
+                np.empty(0, dtype=np.float64),
+                np.empty(0, dtype=np.int64))
+    if af_target_value is None or af_std_value is None:
+        raise ValueError("af_target_value and af_std_value must both be None or both be provided.")
+
+    targets = _broadcast_to_clusters(af_target_value, num_clusters, "af_target_value")
+    stds = _broadcast_to_clusters(af_std_value, num_clusters, "af_std_value")
+    target_missing = np.array([value is None for value in targets], dtype=bool)
+    std_missing = np.array([value is None for value in stds], dtype=bool)
+    if not np.array_equal(target_missing, std_missing):
+        mismatch = np.flatnonzero(target_missing != std_missing).tolist()
+        raise ValueError(
+            "af_target_value and af_std_value must have None at the same cluster positions; "
+            f"mismatched cluster indices (zero-based): {mismatch}."
+        )
+
+    indices: np.ndarray = np.flatnonzero(~target_missing).astype(np.int64)
+    try:
+        targets = targets[indices].astype(np.float64)
+        stds = stds[indices].astype(np.float64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("AF targets and standard deviations must be numeric or paired None entries.") from exc
+    if not np.all(np.isfinite(targets)):
+        raise ValueError("Active af_target_value entries must be finite.")
+    if not np.all(np.isfinite(stds) & (stds > 0)):
+        raise ValueError("Active af_std_value entries must be finite and greater than zero.")
+    return targets, stds, indices
+
+
 def _build_measurement_vectors(
         ppci,
         update_meas_only: bool = False,
-        af_target_value: float | np.ndarray | None = None,
-        af_std_value: float | np.ndarray | None = None,
+        af_target_value: float | list[float | None] | np.ndarray | None = None,
+        af_std_value: float | list[float | None] | np.ndarray | None = None,
 ):
     """
     Building measurement vector z, pandapower to ppci measurement mapping and covariance matrix R
@@ -644,12 +740,15 @@ def _build_measurement_vectors(
         ppci: generated ppci which contains the measurement columns.
         update_meas_only: Only update z if true.
         af_target_value:
-            Optional pseudo-measurements (soft priors) for the allocation factors. Can be a scalar, a numpy array or
-            None. Acts as a preferred value for the allocation factors (e.g. alpha ≈ 0.4) in weakly observable cases and
+            Optional pseudo-measurements (soft priors) for the allocation factors. Can be a scalar, list, numpy array
+            or None. Paired None entries in target and std disable the prior for that cluster. Acts as a preferred
+            value for the allocation factors (e.g. alpha ≈ 0.4) in weakly observable cases and
             regularizes the estimation toward this value, but does not enforce it if it conflicts with the overall
             optimization of the state estimator. Specific value 0.4 used in a grid-operator use case.
         af_std_value:
-            Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, a numpy array or None.
+            Optional standard deviation(s) corresponding to `af_target_value`. Can be a scalar, list, numpy array or
+            None. After broadcasting, None positions must match those in `af_target_value`; active values must be
+            finite and greater than zero.
             Controls how strongly the pseudo-measurements for the allocation factors (e.g. 0.15) influence the
             estimation: smaller values imply a stronger pull toward `af_target_value`, larger values make the
             prior weaker. Specific value 0.15 used in a grid-operator use case.
@@ -695,14 +794,9 @@ def _build_measurement_vectors(
                                 )).astype(bool)
     if ppci.algorithm in ["af-wls", "af-lp"]:
         balance_eq_meas = np.zeros(ppci["rated_power_clusters"].shape[0]).astype(np.float64)
-        # Optional pseudo-measurements (soft priors) for allocation factors. They regularize the estimation towards
-        # alpha ≈ 0.4 in weakly observable cases but are not strictly required for AF estimation. Specific value used
-        # in a grid-operator use case.
-        # af_vmeas = 0.4 * np.ones(len(ppci["clusters"]))
-        if af_target_value is not None:
-            af_vmeas = _prepare_af(af_target_value, len(ppci["clusters"]))
-        else:
-            af_vmeas = np.array([], dtype=np.float64)
+        # Use one common selection for targets, standard deviations and AF rows.
+        af_vmeas, af_vmeas_dev_std, af_meas_indices = _prepare_af_priors(
+            af_target_value, af_std_value, len(ppci["clusters"]))
         z = np.concatenate(
             (z, balance_eq_meas[ppci.non_slack_bus_mask], balance_eq_meas[ppci.non_slack_bus_mask], af_vmeas))
         imag_meas = np.concatenate((imag_meas,
@@ -737,38 +831,30 @@ def _build_measurement_vectors(
                                 )).real.astype(np.float64)
 
         meas_mask: dict[str, NDArray[Any]] = {
-            "pbus" : np.flatnonzero(p_bus_not_nan),
-            "qbus" : np.flatnonzero(q_bus_not_nan),
-            "pfrom" : np.flatnonzero(p_line_f_not_nan),
-            "qfrom" : np.flatnonzero(q_line_f_not_nan),
-            "pto" : np.flatnonzero(p_line_t_not_nan),
-            "qto" : np.flatnonzero(q_line_t_not_nan),
-            "vm" : np.flatnonzero(v_bus_not_nan),
-            "va" : np.flatnonzero(v_degree_bus_not_nan),
-            "ifrom" : np.flatnonzero(i_line_f_not_nan),
-            "ito" : np.flatnonzero(i_line_t_not_nan)
+            "pbus": np.flatnonzero(p_bus_not_nan),
+            "qbus": np.flatnonzero(q_bus_not_nan),
+            "pfrom": np.flatnonzero(p_line_f_not_nan),
+            "qfrom": np.flatnonzero(q_line_f_not_nan),
+            "pto": np.flatnonzero(p_line_t_not_nan),
+            "qto": np.flatnonzero(q_line_t_not_nan),
+            "vm": np.flatnonzero(v_bus_not_nan),
+            "va": np.flatnonzero(v_degree_bus_not_nan),
+            "ifrom": np.flatnonzero(i_line_f_not_nan),
+            "ito": np.flatnonzero(i_line_t_not_nan)
         }
-        
+
         if ppci.algorithm in ["af-wls", "af-lp"]:
             num_clusters = len(ppci["clusters"])
             P_balance_dev_std = np.sqrt(
                 np.sum(np.square(ppci["rated_power_clusters"][:, 2 * num_clusters:3 * num_clusters]), axis=1))
             Q_balance_dev_std = np.sqrt(
                 np.sum(np.square(ppci["rated_power_clusters"][:, 3 * num_clusters:4 * num_clusters]), axis=1))
-            # af_vmeas_dev_std = 0.15 * np.ones(len(ppci["clusters"]))  # for specific use case from grid operators
-            if af_std_value is not None:
-                af_vmeas_dev_std = _prepare_af(af_std_value, len(ppci["clusters"]))
-            else:
-                af_vmeas_dev_std = np.array([], dtype=np.float64)
             r_cov = np.concatenate(
                 (r_cov, P_balance_dev_std[ppci.non_slack_bus_mask], Q_balance_dev_std[ppci.non_slack_bus_mask],
                  af_vmeas_dev_std))
             meas_mask["pbalance"] = np.flatnonzero(ppci.non_slack_bus_mask)
             meas_mask["qbalance"] = np.flatnonzero(ppci.non_slack_bus_mask)
-            if af_target_value is None:
-                meas_mask["afactor"] = np.array([], dtype=np.int64)  # np.empty(0, dtype=np.int64)
-            else:
-                meas_mask["afactor"] = np.arange(num_clusters, dtype=np.int64)
+            meas_mask["afactor"] = af_meas_indices
 
         return z, pp_meas_indices, r_cov, meas_mask, idx_non_imeas
     else:
@@ -795,12 +881,14 @@ def pp2eppci(
         with_ortools: bool = True,
         with_af_constraints: bool = True,
         af_init_value: float | np.ndarray = .5,
-        af_target_value: float | np.ndarray | None = None,
-        af_std_value: float | np.ndarray | None = None,
+        af_target_value: float | list[float | None] | np.ndarray | None = None,
+        af_std_value: float | list[float | None] | np.ndarray | None = None,
 ):
     if isinstance(eppci, ExtendedPPCI):
         eppci.algorithm = algorithm
         eppci.data = _add_measurements_to_ppci(net, eppci.data, zero_injection, algorithm)
+        eppci.af_target_value = af_target_value if algorithm in ["af-wls", "af-lp"] else None
+        eppci.af_std_value = af_std_value if algorithm in ["af-wls", "af-lp"] else None
         eppci.update_meas()
         return net, ppc, eppci
     else:
@@ -839,8 +927,8 @@ class ExtendedPPCI(UserDict):
             ppci,
             algorithm: str,
             af_init_value: float | np.ndarray = .5,
-            af_target_value: float | np.ndarray | None = None,
-            af_std_value: float | np.ndarray | None = None,
+            af_target_value: float | list[float | None] | np.ndarray | None = None,
+            af_std_value: float | list[float | None] | np.ndarray | None = None,
     ):
         """Initialize ppci object with measurements."""
         self.data = ppci
@@ -860,13 +948,13 @@ class ExtendedPPCI(UserDict):
         self.non_slack_bus_mask = (ppci["bus"][:, pypower_BUS_TYPE] != 3).ravel()
         self.num_non_slack_bus = np.sum(self.non_slack_bus_mask)
         self.delta_v_bus_mask = np.r_[self.non_slack_bus_mask,
-                                      np.ones(self.non_slack_bus_mask.shape[0], dtype=bool)].ravel()
+        np.ones(self.non_slack_bus_mask.shape[0], dtype=bool)].ravel()
         self.delta_v_bus_selector = np.flatnonzero(self.delta_v_bus_mask)
 
         self.af_target_value = af_target_value if algorithm in ["af-wls", "af-lp"] else None
         self.af_std_value = af_std_value if algorithm in ["af-wls", "af-lp"] else None
 
-        # Iniialize measurements 
+        # Iniialize measurements
         self._initialize_meas()
 
         # Initialize state variable
@@ -889,6 +977,10 @@ class ExtendedPPCI(UserDict):
         # self.non_nan_meas_selector = np.flatnonzero(self.non_nan_meas_mask)
 
     def update_meas(self):
+        if self.algorithm in ["af-wls", "af-lp"]:
+            # Optional priors can change both the AF row selection and its weights.
+            self._initialize_meas()
+            return
         self.z = _build_measurement_vectors(
             self, update_meas_only=True, af_target_value=self.af_target_value, af_std_value=self.af_std_value
         )

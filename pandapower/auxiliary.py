@@ -1561,8 +1561,8 @@ def _add_se_options(
         with_ortools: bool = True,
         with_af_constraints: bool = True,
         af_init_value: float | np.ndarray = .5,
-        af_target_value: float | np.ndarray | None = None,
-        af_std_value: float | np.ndarray | None = None,
+        af_target_value: float | list[float | None] | np.ndarray | None = None,
+        af_std_value: float | list[float | None] | np.ndarray | None = None
 ) -> None:
 
     options = {
@@ -2437,8 +2437,8 @@ def _init_runse_options(
     with_ortools: bool = True,
     with_af_constraints: bool = True,
     af_init_value: float | np.ndarray = .5,
-    af_target_value: float | np.ndarray | None = None,
-    af_std_value: float | np.ndarray | None = None,
+    af_target_value: float | list[float | None] | np.ndarray | None = None,
+    af_std_value: float | list[float | None] | np.ndarray | None = None,
     **kwargs: Any,
 ) -> None:
 

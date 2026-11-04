@@ -73,19 +73,19 @@ def _create_2bus_test_net() -> pandapowerNet:
 
 def _r(v: float = 0.03) -> float:
     """
-        Return a random scaling factor from a normal distribution.
+    Return a random scaling factor from a normal distribution.
 
-        The value is drawn from a normal distribution with mean ``1.0`` and standard deviation ``v``. This can be used
-        to apply a multiplicative perturbation to quantities such as powers or loads.
+    The value is drawn from a normal distribution with mean ``1.0`` and standard deviation ``v``. This can be used
+    to apply a multiplicative perturbation to quantities such as powers or loads.
 
-        Parameters:
-            v: Standard deviation of the normal distribution
-                :math:`\\mathcal{N}(1.0, v)`. Defaults to ``0.03``.
+    Parameters:
+        v: Standard deviation of the normal distribution
+            :math:`\\mathcal{N}(1.0, v)`. Defaults to ``0.03``.
 
-        Returns:
-            Random scaling factor sampled from
-            :math:`\\mathcal{N}(1.0, v)`.
-        """
+    Returns:
+        Random scaling factor sampled from
+        :math:`\\mathcal{N}(1.0, v)`.
+    """
     return float(np.random.normal(1.0, v))
 
 
