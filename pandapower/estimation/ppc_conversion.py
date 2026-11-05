@@ -417,6 +417,16 @@ def _add_rated_power_information_af_wls(net, ppci):
     cluster_list_loads = net.load["type"].unique()
     cluster_list_gen = net.sgen["type"].unique()
     cluster_list_tot = np.concatenate((cluster_list_loads, cluster_list_gen), axis=0)
+
+    active_load_types = net.load.loc[net.load["in_service"], "type"].unique()
+    active_sgen_types = net.sgen.loc[net.sgen["in_service"], "type"].unique()
+    active_cluster_mask = np.concatenate(
+        (np.isin(cluster_list_loads, active_load_types), np.isin(cluster_list_gen, active_sgen_types))
+    )
+
+    ppci["af_original_num_clusters"] = len(cluster_list_tot)
+    ppci["af_active_cluster_indices"] = np.flatnonzero(active_cluster_mask)
+
     ppci["clusters"] = cluster_list_tot
     num_clusters = len(cluster_list_tot)
     num_buses = ppci["bus"].shape[0]
@@ -449,6 +459,15 @@ def _add_rated_power_information_af_wls(net, ppci):
                 0.03 * P_i)  # std dev cluster variability hardcoded, think how to change it
             ppci["rated_power_clusters"][bus_i, cluster_i + 3 * num_clusters] += abs(
                 0.03 * Q_i)  # std dev cluster variability hardcoded, think how to change it
+
+    active_indices = ppci["af_active_cluster_indices"]
+    if active_indices.size == 0:
+        raise ValueError("AF estimation requires at least one active load or sgen cluster.")
+    if active_indices.size < num_clusters:
+        # Select the active clusters in each block: P, Q, std(P), std(Q).
+        selected_columns = np.concatenate([active_indices + block * num_clusters for block in range(4)])
+        ppci["clusters"] = cluster_list_tot[active_indices]
+        ppci["rated_power_clusters"] = ppci["rated_power_clusters"][:, selected_columns]
 
 
 def _add_measurements_to_ppci(net, ppci, zero_injection, algorithm):
@@ -795,8 +814,22 @@ def _build_measurement_vectors(
     if ppci.algorithm in ["af-wls", "af-lp"]:
         balance_eq_meas = np.zeros(ppci["rated_power_clusters"].shape[0]).astype(np.float64)
         # Use one common selection for targets, standard deviations and AF rows.
-        af_vmeas, af_vmeas_dev_std, af_meas_indices = _prepare_af_priors(
-            af_target_value, af_std_value, len(ppci["clusters"]))
+        af_vmeas, af_vmeas_dev_std, original_prior_indices = _prepare_af_priors(
+            af_target_value, af_std_value, ppci["af_original_num_clusters"]
+        )
+        af_meas_indices = original_prior_indices
+
+        active_indices = ppci["af_active_cluster_indices"]
+        if active_indices.size < ppci["af_original_num_clusters"]:
+            # Map original cluster indices to positions in the active AF state vector.
+            original_to_active = np.full(ppci["af_original_num_clusters"], -1, dtype=np.int64)
+            original_to_active[active_indices] = np.arange(active_indices.size, dtype=np.int64)
+            mapped_prior_indices = original_to_active[original_prior_indices]
+            keep_prior = mapped_prior_indices >= 0
+            af_vmeas = af_vmeas[keep_prior]
+            af_vmeas_dev_std = af_vmeas_dev_std[keep_prior]
+            af_meas_indices = mapped_prior_indices[keep_prior]
+
         z = np.concatenate(
             (z, balance_eq_meas[ppci.non_slack_bus_mask], balance_eq_meas[ppci.non_slack_bus_mask], af_vmeas))
         imag_meas = np.concatenate((imag_meas,
@@ -965,7 +998,8 @@ class ExtendedPPCI(UserDict):
         self.delta = self.delta_init.copy()
         self.E = self.E_init.copy()
         if algorithm in ["af-wls", "af-lp"]:  # set initial value for all allocation factors in E
-            af_init = _prepare_af(af_init_value, len(ppci["clusters"]))
+            af_init = _prepare_af(af_init_value, ppci["af_original_num_clusters"])
+            af_init = af_init[ppci["af_active_cluster_indices"]]
             self.E = np.concatenate((self.E, af_init))
 
     def _initialize_meas(self):
