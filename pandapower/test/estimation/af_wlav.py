@@ -8,7 +8,7 @@ import os
 import simbench as sb
 import time
 
-from datetime import timedelta
+from datetime import timedelta, datetime
 from tqdm import tqdm
 from dotenv import load_dotenv
 
@@ -64,7 +64,7 @@ def _deactivate_sgen_by_type(
     ``in_service`` status to ``False``. The network is modified in-place.
 
     Parameters:
-        net: Pandapower network that is modified in-place.
+        net: pandapower network that is modified in-place.
         sgen_type: Static-generator type to deactivate.
 
     Raises: KeyError: If the ``type`` column does not exist in ``net.sgen``.
@@ -468,16 +468,13 @@ def _create_simbench_mc_case(
         if table.empty:
             continue
 
-        for idx in table.index:
+        for idx in table.index[table["in_service"]]:
             cluster = table.at[idx, "type"]
-
             low, high = scaling_ranges[cluster]
             factor = np.random.uniform(low, high)
 
             k[element][idx] = factor
-
             table.at[idx, "p_mw"] *= factor
-
             if "q_mvar" in table.columns:
                 table.at[idx, "q_mvar"] *= factor
         net_pf[element] = table
@@ -1017,7 +1014,7 @@ def _calc_different_se(
         else:
             try:
                 net_af_wls = copy.deepcopy(net_base)
-                af_wls = estimate(net_af_wls, algorithm="af-wls",maximum_iterations=100)
+                af_wls = estimate(net_af_wls, algorithm="af-wls", maximum_iterations=100)
                 # ToDo: add TypeDict for state estimation
                 af_wls["allocation_factors"].index = ["AF-WLS"]  # type: ignore[attr-defined]
                 if not af_wls["success"]:
@@ -2628,18 +2625,55 @@ def _get_allocation_factor_names(net: pandapowerNet) -> tuple[list[str], int]:
     return sorted(cluster_names), number_af
 
 
-def _drop_not_used_measurement_se(net: pandapowerNet) -> None:
+def _prepare_simbench_af_clusters(
+        net: pandapowerNet,
+        grid_name: str,
+        scaling_ranges: dict[str, tuple[float, float]],
+) -> None:
     """
-    Remove measurements not used for state estimation and duplicate measurement locations.
+    Assign SimBench load clusters and check their scaling ranges.
 
-    Current measurements and active/reactive power measurements assigned to buses are removed. If multiple measurements
-    have the same measurement type, element type, element, side, subnet and voltage level, only the first is retained.
-    Missing optional columns are excluded from the duplicate comparison. The measurement name, value and standard
-    deviation are not considered when identifying duplicates. The measurement table is modified in place and its index
-    is reset. Reason: state estimation can work better without these measurements?
+    Classify loads by the absolute value of their nominal active power. Preserve existing load types for grids without
+    a configured threshold. Update the network in place.
+
+    Parameters:
+        net:
+        grid_name:
+        scaling_ranges:
+
+    Returns: None
+    """
+
+    load_thresholds_mw = {"1-MV-rural--0-sw": 0.30, "1-MV-urban--0-sw": 0.35, "1-MV-comm--0-sw": 0.70}
+    threshold = load_thresholds_mw.get(grid_name)
+
+    if threshold is not None:
+        p_loads = net.load["p_mw"].abs()
+        net.load["type"] = np.select(
+            [p_loads <= threshold, p_loads > threshold],
+            ["residential", "commercial"],
+            default="unknown"
+        )
+
+    cluster_names, _ = _get_allocation_factor_names(net)
+    missing_scaling = [name for name in cluster_names if name not in scaling_ranges]
+    if missing_scaling:
+        raise ValueError(f"Missing scaling ranges for: {missing_scaling}")
+
+
+def _drop_not_used_measurement_se(net: pandapowerNet, keep_duplicated: bool = False) -> None:
+    """
+    Filter the network's measurement table for state estimation.
+
+    Remove all current measurements and all active and reactive power measurements at buses. If keep_duplicated is
+    False, retain only the first row for each combination of measurement type, element type, element, side, subnet and
+    voltage level. Use only columns present in the table for duplicate detection. Modify the measurement table in place
+    and reset its row index after filtering.
 
     Parameters:
         net: net with different measurements.
+        keep_duplicated:
+            Whether to retain duplicate measurement rows after removing current measurements and bus power measurements.
 
     Returns: None
     """
@@ -2654,10 +2688,13 @@ def _drop_not_used_measurement_se(net: pandapowerNet) -> None:
     # Remove the selected measurements and rebuild the row index.
     measurements.drop(index=measurements.index[current_mask | bus_power_mask], inplace=True)
 
-    # drop duplicated measurements and keep the first one and reset index
-    identity_elements = ["measurement_type", "element_type", "element", "side", "subnet", "voltLvl"]
-    identity_columns = [column for column in identity_elements if column in measurements.columns]
-    measurements.drop_duplicates(subset=identity_columns, keep="first", inplace=True)
+    if not keep_duplicated:
+        # drop duplicated measurements and keep the first one and reset index
+        identity_elements = ["measurement_type", "element_type", "element", "side", "subnet", "voltLvl"]
+        identity_columns = [column for column in identity_elements if column in measurements.columns]
+        measurements.drop_duplicates(subset=identity_columns, keep="first", inplace=True)
+
+    # reset index in measurement table
     measurements.reset_index(drop=True, inplace=True)
 
 
@@ -2687,10 +2724,10 @@ if __name__ == "__main__":
     with_ortools_b: bool = False
     af_constraints_b: bool = True
     with_wls_b: bool = True
-    used_rv: float = .01
-    used_ri: float = .01
-    used_rp: float = .01
-    used_rq: float = .01
+    used_rv: float = .06
+    used_ri: float = .06
+    used_rp: float = .06
+    used_rq: float = .06
     scaling_ranges_dc: dict[str, tuple[float, float]] = {
         "Biomass_MV": (0.8, 1.0),
         "Hydro_MV": (0.6, 1.0),
@@ -2821,74 +2858,29 @@ if __name__ == "__main__":
             _evaluation_af(d_path, e_path)
             _evaluation_vp(d_path, e_path, 3.0, False)
             _evaluation_bus(d_path, e_path, False)
-            # net_sb.measurement.drop(net_sb.measurement.index, inplace=True)
             print(f"finished: {sb_grid}")
 
     if simbench_b:
         subdir = "000"
-        sb_grid_name = "1-MV-urban--0-sw"  # "1-MV-rural--0-sw" "1-MV-urban--0-sw" ## "1-MV-comm--0-sw" -> voltage looks good for state estimation
+        sb_grid_name = "1-MV-comm--0-sw"  # "1-MV-rural--0-sw" "1-MV-urban--0-sw" ## "1-MV-comm--0-sw" -> voltage looks good for state estimation
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name, subdir)
         os.makedirs(d_path, exist_ok=True)
         path_para = os.path.join(d_path, "simulation_parameters.csv")
-        para_df.to_csv(path_para, sep=";", decimal=",", index=False)
+        if not os.path.exists(path_para):
+            para_df.to_csv(path_para, sep=";", decimal=",", index=False)
+        else:
+            print(f"{path_para} already exists.")
         print(f"simulation parameters saved to: {path_para}")
 
         net_sb = sb.get_simbench_net(sb_grid_name)
 
-        # delete biomass -> some problems with allocation factors
-        mask = net_sb.sgen["type"].eq("Biomass_MV")
-        sgen_indices = net_sb.sgen.index[mask]
-        print(f"deleted sgen: {net_sb.sgen.loc[sgen_indices]}")
-        net_sb.sgen.drop(index=sgen_indices, inplace=True)
-
-        # _deactivate_sgen_by_type(net_sb, "Biomass_MV")  # wls get problems with in_service = False ToDo: check this
-        # net_elements_ls = _get_non_empty_table_names(net_sb)
+        _deactivate_sgen_by_type(net_sb, "Biomass_MV")
+        net_elements_ls = _get_non_empty_table_names(net_sb)
 
         _drop_not_used_measurement_se(net_sb)
 
         # create new clusters for allocation factors
-        p_loads = net_sb.load["p_mw"].abs()
-        if sb_grid_name == "1-MV-rural--0-sw":
-            net_sb.load["type"] = np.select(  # "1-MV-rural--0-sw"  -> wls algorithm does not work
-                [
-                    p_loads <= 0.3,
-                    p_loads > 0.3
-                ],
-                [
-                    "residential",
-                    "commercial"
-                ],
-                default="unknown"
-            )
-        if sb_grid_name == "1-MV-urban--0-sw":
-            net_sb.load["type"] = np.select(  # "1-MV-urban--0-sw"  -> wlav strange results, check these
-                [
-                    p_loads <= 0.35,
-                    p_loads > 0.35
-                ],
-                [
-                    "residential",
-                    "commercial"
-                ],
-                default="unknown"
-            )
-        if sb_grid_name == "1-MV-comm--0-sw":
-            net_sb.load["type"] = np.select(  # "1-MV-comm--0-sw"
-                [
-                    p_loads <= 0.70,
-                    p_loads > 0.70
-                ],
-                [
-                    "residential",
-                    "commercial"
-                ],
-                default="unknown"
-            )
-
-        cluster_ls, cluster_nb = _get_allocation_factor_names(net_sb)
-        missing_scaling = [af for af in cluster_ls if af not in scaling_ranges_dc]
-        if missing_scaling:
-            raise ValueError(f"Missing scaling ranges for: {missing_scaling}")
+        _prepare_simbench_af_clusters(net_sb, sb_grid_name, scaling_ranges_dc)
 
         _create_random_estimations_simbench(
             net=net_sb,
@@ -2925,42 +2917,62 @@ if __name__ == "__main__":
     if plot_grid_b:
         sb_grid_name = "1-MV-comm--0-sw"  ## "1-MV-rural--0-sw" "1-MV-urban--0-sw"
         d_path = os.path.join(os.getenv("PATH_DATA_SB", "."), sb_grid_name)
+        ts = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+        filename = os.path.join(d_path, f"{ts}-{sb_grid_name}.html")
+
+        if not os.path.isfile(filename):
+            net_sb = sb.get_simbench_net(sb_grid_name)
+            _prepare_simbench_af_clusters(net_sb, sb_grid_name, scaling_ranges_dc)
+            _drop_not_used_measurement_se(net_sb, True)
+            np.random.seed(used_seed)
+            k = _create_simbench_mc_case(net_sb, used_seed_pf, scaling_ranges=scaling_ranges_dc)
+            _fill_measurement_values_from_powerflow(net_sb, used_seed_m, used_rv, used_ri, used_rp, used_rq)
+
+            # new geodata for simbench grid
+            graph = create_nxgraph(net_sb)
+            create_generic_coordinates(net_sb, graph, overwrite=True)
+
+            meas_traces = create_measurement_trace(net_sb)
+            fig_s_plot = simple_plotly(
+                net_sb,
+                filename=filename,
+                auto_open=False,
+                figsize=2.0,
+                bus_size=8,
+                additional_traces=meas_traces
+            )  # do not show bus-bus-switches which are closed -> urban shows no connection between trafo and grid
+        else:
+            print(f"HTML file already exists: {filename}")
+
+    wls_in_service_b: bool = False
+    if wls_in_service_b:
+        np.random.seed(112)
+        sb_grid_name = "1-MV-rural--0-sw"
         net_sb = sb.get_simbench_net(sb_grid_name)
 
-        _drop_not_used_measurement_se(net_sb)
-        np.random.seed(112)
-        k = _create_simbench_mc_case(net_sb, None, scaling_ranges=scaling_ranges_dc)
-        _fill_measurement_values_from_powerflow(net_sb, None, .01, .01, .01, .01)
+        _prepare_simbench_af_clusters(net_sb, sb_grid_name, scaling_ranges_dc)
 
-        # new geodata for simbench grid
-        graph = create_nxgraph(net_sb)
-        create_generic_coordinates(net_sb, graph, overwrite=True)
+        k = _create_simbench_mc_case(net_sb, None, scaling_ranges_dc)
+        _fill_measurement_values_from_powerflow(net_sb, None, used_rv, used_ri, used_rp, used_rq)
 
-        meas_traces = create_measurement_trace(net_sb)
-        fig_s_plot = simple_plotly(
-            net_sb,
-            filename=os.path.join(d_path, f"{sb_grid_name}.html"),
-            auto_open=False,
-            figsize=2.0,
-            bus_size=8,
-            additional_traces=meas_traces
-        )  # do not show bus-bus-switches which are closed -> urban shows no connection between trafo and grid
+        net_wlav = copy.deepcopy(net_sb)
+        net_wls = copy.deepcopy(net_sb)
 
-    wls_in_service_b: bool = True
-    if wls_in_service_b:
-
-        # net_rural_ref = sb.get_simbench_net("1-MV-rural--0-sw")
-        # net_wls_rural_30 = from_pickle(os.getenv("FILE_03"))
-        # net_wls_rural_32 = from_pickle(os.getenv("FILE_04"))
-
-        net_comm_ref = sb.get_simbench_net("1-MV-comm--0-sw")
-        net_wls_comm_100 = from_pickle(os.getenv("FILE_01"))
-        net_wls_comm_102 = from_pickle(os.getenv("FILE_02"))
-
-        # res_wls_comm_100 = estimate(net_wls_comm_100, algorithm="af-wls",maximum_iterations=100)
+        _deactivate_sgen_by_type(net_sb, "Biomass_MV")
+        net_wlav_d = copy.deepcopy(net_sb)
+        net_wls_d = copy.deepcopy(net_sb)
 
         res_af_wlav = estimate(
-            net_wls_comm_100,
+            net_wlav,
+            algorithm="af-lp",
+            wlav=True,
+            with_ortools=False,
+            with_af_constraints=True,
+            linprog_method="highs-ipm",
+            maximum_iterations=100
+        )
+        res_af_wlav_d = estimate(
+            net_wlav_d,
             algorithm="af-lp",
             wlav=True,
             with_ortools=False,
@@ -2969,8 +2981,33 @@ if __name__ == "__main__":
             maximum_iterations=100
         )
 
-        res_wls_comm_102 = estimate(net_wls_comm_102, algorithm="af-wls",maximum_iterations=100)
-        print(f"no pass")
+        res_af_wls = estimate(net_wls, algorithm="af-wls", maximum_iterations=100)
+        res_af_wls_d = estimate(net_wls_d, algorithm="af-wls", maximum_iterations=100)
+
+        print("end")
+
+        # net_rural_ref = sb.get_simbench_net("1-MV-rural--0-sw")
+        # net_wls_rural_30 = from_pickle(os.getenv("FILE_03"))
+        # net_wls_rural_32 = from_pickle(os.getenv("FILE_04"))
+
+        # net_comm_ref = sb.get_simbench_net("1-MV-comm--0-sw")
+        # net_wls_comm_100 = from_pickle(os.getenv("FILE_01"))
+        # net_wls_comm_102 = from_pickle(os.getenv("FILE_02"))
+
+        # res_wls_comm_100 = estimate(net_wls_comm_100, algorithm="af-wls",maximum_iterations=100)
+
+        # res_af_wlav = estimate(
+        #     net_wls_comm_100,
+        #     algorithm="af-lp",
+        #     wlav=True,
+        #     with_ortools=False,
+        #     with_af_constraints=True,
+        #     linprog_method="highs-ipm",
+        #     maximum_iterations=100
+        # )
+        #
+        # res_wls_comm_102 = estimate(net_wls_comm_102, algorithm="af-wls",maximum_iterations=100)
+        # print(f"no pass")
 
     runtime = time.perf_counter() - time_start
     print(f"calculated in: {timedelta(seconds=runtime)}")
